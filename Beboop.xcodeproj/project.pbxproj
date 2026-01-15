@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -22,7 +22,7 @@
 		500D92725AF23FA49BECBA0E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		610918B689732B2C9B11B115 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		7DEAC2FB08E925E009BA0492 /* SoundPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundPlayer.swift; sourceTree = "<group>"; };
-		A250B80C06E54D0CCD346E66 /* Beboop.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Beboop.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A250B80C06E54D0CCD346E66 /* Beboop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Beboop.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAF3D3CD174DC58CBDD91B5B /* BeboopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeboopApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -94,11 +94,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-					0967040250D80C61139691C3 = {
-						DevelopmentTeam = "";
-					};
-				};
 			};
 			buildConfigurationList = EDD76D68D8A23C54ABCB91E6 /* Build configuration list for PBXProject "Beboop" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -110,7 +105,6 @@
 			);
 			mainGroup = 72CE12F626370A58A864C55C;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -151,7 +145,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = YS8CD5VJH4;
 				INFOPLIST_FILE = Beboop/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -169,7 +163,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = YS8CD5VJH4;
 				INFOPLIST_FILE = Beboop/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
