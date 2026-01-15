@@ -15,7 +15,9 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleVersion</key>
-    <string>1768506787</string>
+    <string>1768507271</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Beboop needs your microphone to record sounds when you press the tiles.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UISupportedInterfaceOrientations</key>
