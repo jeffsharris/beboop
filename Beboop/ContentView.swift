@@ -8,37 +8,26 @@ struct ContentView: View {
     @State private var showShareSheet = false
 
     private let columns = [
-        GridItem(.flexible(), spacing: 16),
-        GridItem(.flexible(), spacing: 16)
+        GridItem(.flexible(), spacing: 0),
+        GridItem(.flexible(), spacing: 0)
     ]
 
     var body: some View {
-        ZStack {
-            // Soft gradient background
-            LinearGradient(
-                colors: [
-                    Color(red: 0.98, green: 0.96, blue: 0.94),
-                    Color(red: 0.95, green: 0.92, blue: 0.98)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+        GeometryReader { geometry in
+            let tileHeight = geometry.size.height / 5
 
-            VStack(spacing: 16) {
-                // Header
-                Text("Beboop")
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .foregroundColor(Color(red: 0.3, green: 0.25, blue: 0.35))
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.98, green: 0.96, blue: 0.94),
+                        Color(red: 0.95, green: 0.92, blue: 0.98)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
 
-                Text(instructionText)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(Color(red: 0.5, green: 0.45, blue: 0.55))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-
-                // Tile Grid
-                LazyVGrid(columns: columns, spacing: 16) {
+                LazyVGrid(columns: columns, spacing: 0) {
                     ForEach(0..<10, id: \.self) { index in
                         SoundTileView(
                             index: index,
@@ -56,6 +45,12 @@ struct ContentView: View {
                             onPlay: {
                                 audioManager.play(tileIndex: index)
                             },
+                            onStartLooping: {
+                                audioManager.startLooping(tileIndex: index)
+                            },
+                            onStopLooping: {
+                                audioManager.stopLoopingAfterCurrent(tileIndex: index)
+                            },
                             onClear: {
                                 audioManager.clearRecording(for: index)
                                 refreshTileStates()
@@ -70,16 +65,12 @@ struct ContentView: View {
                                 audioManager.resetPlaybackSpeed(for: index)
                             }
                         )
-                        .aspectRatio(1, contentMode: .fit)
-                        .id("\(index)-\(tileStates[index])-\(refreshTrigger)-\(audioManager.playbackSpeeds[index] ?? 1.0)")
+                        .frame(height: tileHeight)
+                        .id("\(index)-\(tileStates[index])-[\(refreshTrigger)]-\(audioManager.playbackSpeeds[index] ?? 1.0)")
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-
-                Spacer()
+                .ignoresSafeArea()
             }
-            .padding(.top, 16)
         }
         .sheet(isPresented: $showShareSheet) {
             if let url = shareURL {
@@ -88,16 +79,7 @@ struct ContentView: View {
         }
     }
 
-    private var instructionText: String {
-        if audioManager.isRecording {
-            return "Recording... Release to stop"
-        } else {
-            return "Hold to record, Tap to play, Swipe for options"
-        }
-    }
-
     private func refreshTileStates() {
-        // Toggle to force UI refresh
         for i in 0..<10 {
             tileStates[i] = audioManager.hasRecording(for: i)
         }
@@ -112,7 +94,6 @@ struct ContentView: View {
     }
 }
 
-// UIKit Share Sheet wrapper for SwiftUI
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
