@@ -32,7 +32,6 @@ final class AudioManager: ObservableObject {
     // MARK: - Recording
 
     func startRecording(for tileIndex: Int) {
-        // Request microphone permission if needed
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
                 if granted {
@@ -45,7 +44,6 @@ final class AudioManager: ObservableObject {
     }
 
     private func beginRecording(for tileIndex: Int) {
-        // Stop any existing recording
         stopRecording()
 
         let url = audioFileURL(for: tileIndex)
@@ -65,7 +63,6 @@ final class AudioManager: ObservableObject {
             isRecording = true
             currentRecordingTile = tileIndex
 
-            // Haptic feedback for recording start
             let generator = UIImpactFeedbackGenerator(style: .medium)
             generator.impactOccurred()
         } catch {
@@ -81,7 +78,6 @@ final class AudioManager: ObservableObject {
         isRecording = false
         currentRecordingTile = nil
 
-        // Haptic feedback for recording stop
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
     }
@@ -89,6 +85,8 @@ final class AudioManager: ObservableObject {
     // MARK: - Playback
 
     func play(tileIndex: Int) {
+        stopPlayback(for: tileIndex)
+
         let url = audioFileURL(for: tileIndex)
 
         guard fileManager.fileExists(atPath: url.path) else {
@@ -96,22 +94,54 @@ final class AudioManager: ObservableObject {
         }
 
         do {
-            // Create a new player for this tile (allows simultaneous playback)
             let player = try AVAudioPlayer(contentsOf: url)
             player.enableRate = true
             player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
             player.prepareToPlay()
             player.play()
 
-            // Store the player to keep it alive
             players[tileIndex] = player
 
-            // Haptic feedback for playback
             let generator = UIImpactFeedbackGenerator(style: .soft)
             generator.impactOccurred()
         } catch {
             print("Playback failed: \(error)")
         }
+    }
+
+    func startLooping(tileIndex: Int) {
+        stopPlayback(for: tileIndex)
+
+        let url = audioFileURL(for: tileIndex)
+
+        guard fileManager.fileExists(atPath: url.path) else {
+            return
+        }
+
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.enableRate = true
+            player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
+            player.numberOfLoops = -1
+            player.prepareToPlay()
+            player.play()
+
+            players[tileIndex] = player
+        } catch {
+            print("Looped playback failed: \(error)")
+        }
+    }
+
+    func stopLoopingAfterCurrent(tileIndex: Int) {
+        guard let player = players[tileIndex] else { return }
+        if player.numberOfLoops == -1 {
+            player.numberOfLoops = 0
+        }
+    }
+
+    private func stopPlayback(for tileIndex: Int) {
+        players[tileIndex]?.stop()
+        players[tileIndex] = nil
     }
 
     func hasRecording(for tileIndex: Int) -> Bool {
@@ -129,7 +159,6 @@ final class AudioManager: ObservableObject {
         let clampedSpeed = min(max(speed, Self.minSpeed), Self.maxSpeed)
         playbackSpeeds[tileIndex] = clampedSpeed
 
-        // Update currently playing audio if any
         if let player = players[tileIndex], player.isPlaying {
             player.rate = clampedSpeed
         }
@@ -138,7 +167,6 @@ final class AudioManager: ObservableObject {
     func resetPlaybackSpeed(for tileIndex: Int) {
         playbackSpeeds[tileIndex] = Self.defaultSpeed
 
-        // Haptic feedback for reset
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
     }
@@ -146,11 +174,8 @@ final class AudioManager: ObservableObject {
     // MARK: - Clear Recording
 
     func clearRecording(for tileIndex: Int) {
-        // Stop playback if playing
-        players[tileIndex]?.stop()
-        players[tileIndex] = nil
+        stopPlayback(for: tileIndex)
 
-        // Clear speed setting
         playbackSpeeds[tileIndex] = nil
 
         let url = audioFileURL(for: tileIndex)
@@ -160,7 +185,6 @@ final class AudioManager: ObservableObject {
                 try fileManager.removeItem(at: url)
             }
 
-            // Haptic feedback for clear
             let generator = UINotificationFeedbackGenerator()
             generator.notificationOccurred(.warning)
         } catch {
@@ -175,7 +199,6 @@ final class AudioManager: ObservableObject {
         return documentsPath.appendingPathComponent("tile_\(tileIndex).m4a")
     }
 
-    // For sharing - returns the URL if recording exists
     func getShareableURL(for tileIndex: Int) -> URL? {
         let url = audioFileURL(for: tileIndex)
         return fileManager.fileExists(atPath: url.path) ? url : nil
