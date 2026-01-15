@@ -26,7 +26,6 @@ struct SoundTileView: View {
     @State private var speedDragStart: Float = 1.0
     @State private var loopWorkItem: DispatchWorkItem?
     @State private var isLoopingPlayback = false
-    @State private var isInteractingWithPlayButton = false
 
     // Gesture thresholds
     private let tapThreshold: CGFloat = 15
@@ -37,16 +36,17 @@ struct SoundTileView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let size = min(geometry.size.width, geometry.size.height)
+            let tileSize = geometry.size
+            let minSize = min(tileSize.width, tileSize.height)
 
             ZStack {
-                flipTile(size: size)
+                flipTile(size: tileSize, minSize: minSize)
 
                 if (isAdjustingSpeed || playbackSpeed != 1.0) && !showBack {
-                    speedIndicator(size: size)
+                    speedIndicator(size: minSize)
                 }
             }
-            .frame(width: size, height: size)
+            .frame(width: tileSize.width, height: tileSize.height)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -54,7 +54,7 @@ struct SoundTileView: View {
     // MARK: - Main Tile
 
     @ViewBuilder
-    private func mainTile(size: CGFloat) -> some View {
+    private func mainTile(size: CGSize, minSize: CGFloat) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(backgroundColor)
@@ -75,13 +75,9 @@ struct SoundTileView: View {
                     )
             }
 
-            tileIcon(size: size)
-
-            if hasRecording && !isRecording {
-                playButton(size: size)
-            }
+            tileIcon(size: minSize)
         }
-        .frame(width: size, height: size)
+        .frame(width: size.width, height: size.height)
         .scaleEffect(isPressed ? 0.96 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isPressed)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dragOffset)
@@ -115,44 +111,9 @@ struct SoundTileView: View {
         }
     }
 
-    @ViewBuilder
-    private func playButton(size: CGFloat) -> some View {
-        let buttonSize = size * 0.22
-        Button(action: {
-            onPlay()
-        }) {
-            Image(systemName: "play.fill")
-                .font(.system(size: buttonSize * 0.5, weight: .bold))
-                .foregroundColor(.white.opacity(0.9))
-                .frame(width: buttonSize, height: buttonSize)
-                .background(Color.black.opacity(0.25))
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onLongPressGesture(minimumDuration: 0, pressing: { isPressing in
-            isInteractingWithPlayButton = isPressing
-        }, perform: {})
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: loopStartDelay)
-                .onEnded { _ in
-                    onStartLooping()
-                    isLoopingPlayback = true
-                }
-        )
-        .onLongPressGesture(minimumDuration: loopStartDelay, pressing: { isPressing in
-            if !isPressing && isLoopingPlayback {
-                onStopLooping()
-                isLoopingPlayback = false
-            }
-        }, perform: {})
-        .padding(.bottom, size * 0.08)
-        .padding(.trailing, size * 0.08)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-    }
-
     // MARK: - Back Tile
 
-    private func backTile(size: CGFloat) -> some View {
+    private func backTile(size: CGSize, minSize: CGFloat) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(color.opacity(0.7))
@@ -161,22 +122,22 @@ struct SoundTileView: View {
                         .stroke(Color.white.opacity(0.25), lineWidth: 2)
                 )
 
-            VStack(spacing: size * 0.08) {
+            VStack(spacing: minSize * 0.14) {
                 Spacer()
 
                 if playbackSpeed != 1.0 {
-                    backTileButton(icon: "arrow.counterclockwise", tint: Color.blue, size: size, label: "Reset") {
+                    backTileButton(icon: "arrow.counterclockwise", tint: Color.blue, size: minSize) {
                         onResetSpeed()
                         flipBack()
                     }
                 }
 
-                backTileButton(icon: "square.and.arrow.up", tint: Color.green, size: size, label: "Share") {
+                backTileButton(icon: "square.and.arrow.up", tint: Color.green, size: minSize) {
                     onShare()
                     flipBack()
                 }
 
-                backTileButton(icon: "trash.fill", tint: Color.red, size: size, label: "Delete") {
+                backTileButton(icon: "trash.fill", tint: Color.red, size: minSize) {
                     onClear()
                     flipBack()
                 }
@@ -184,27 +145,23 @@ struct SoundTileView: View {
                 Spacer()
             }
         }
+        .frame(width: size.width, height: size.height)
         .onTapGesture {
             flipBack()
         }
     }
 
     @ViewBuilder
-    private func backTileButton(icon: String, tint: Color, size: CGFloat, label: String, action: @escaping () -> Void) -> some View {
+    private func backTileButton(icon: String, tint: Color, size: CGFloat, action: @escaping () -> Void) -> some View {
+        let buttonSize = size * 0.32
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: size * 0.18, weight: .semibold))
-                Text(label)
-                    .font(.system(size: size * 0.14, weight: .semibold, design: .rounded))
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, size * 0.12)
-            .padding(.vertical, size * 0.08)
-            .frame(maxWidth: size * 0.7)
-            .background(tint.opacity(0.85))
-            .clipShape(Capsule())
-            .shadow(color: tint.opacity(0.35), radius: 4, x: 0, y: 2)
+            Image(systemName: icon)
+                .font(.system(size: size * 0.18, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: buttonSize, height: buttonSize)
+                .background(tint.opacity(0.85))
+                .clipShape(Circle())
+                .shadow(color: tint.opacity(0.35), radius: 4, x: 0, y: 2)
         }
         .buttonStyle(.plain)
     }
@@ -269,10 +226,6 @@ struct SoundTileView: View {
     private func handleDragChanged(_ value: DragGesture.Value) {
         let translation = value.translation
 
-        if isInteractingWithPlayButton {
-            return
-        }
-
         if showBack {
             if abs(translation.width) > gestureThreshold {
                 dragOffset = translation
@@ -330,8 +283,12 @@ struct SoundTileView: View {
 
         cancelLoopStart()
 
-        if isInteractingWithPlayButton {
-            isInteractingWithPlayButton = false
+        if isRecording {
+            onStopRecording()
+            playInteractionSound(.release)
+            isPressed = false
+            dragOffset = .zero
+            isAdjustingSpeed = false
             return
         }
 
@@ -366,9 +323,7 @@ struct SoundTileView: View {
             }
         } else {
             onStopRecording()
-            if isRecording {
-                playInteractionSound(.release)
-            }
+            playInteractionSound(.release)
         }
     }
 
@@ -414,13 +369,13 @@ struct SoundTileView: View {
         }
     }
 
-    private func flipTile(size: CGFloat) -> some View {
+    private func flipTile(size: CGSize, minSize: CGFloat) -> some View {
         ZStack {
-            mainTile(size: size)
+            mainTile(size: size, minSize: minSize)
                 .opacity(showBack ? 0.0 : 1.0)
                 .rotation3DEffect(.degrees(showBack ? 180 : 0), axis: (x: 0, y: 1, z: 0))
 
-            backTile(size: size)
+            backTile(size: size, minSize: minSize)
                 .opacity(showBack ? 1.0 : 0.0)
                 .rotation3DEffect(.degrees(showBack ? 0 : -180), axis: (x: 0, y: 1, z: 0))
         }
