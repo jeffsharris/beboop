@@ -10,5 +10,8 @@ build/
 .build/
 .swiftpm/
 
+# Bundler
+.bundle/
+
 # Environment
 .env
