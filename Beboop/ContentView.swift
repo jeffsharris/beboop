@@ -6,11 +6,15 @@ struct ContentView: View {
     @State private var refreshTrigger = false
     @State private var shareURL: URL?
     @State private var showShareSheet = false
+    @State private var activeBackIndex: Int?
 
     var body: some View {
         GeometryReader { geometry in
-            let tileHeight = geometry.size.height / 5
-            let tileWidth = geometry.size.width / 2
+            let safeAreaInsets = geometry.safeAreaInsets
+            let fullHeight = geometry.size.height + safeAreaInsets.top + safeAreaInsets.bottom
+            let fullWidth = geometry.size.width + safeAreaInsets.leading + safeAreaInsets.trailing
+            let tileHeight = fullHeight / 5
+            let tileWidth = fullWidth / 2
             let columns = [
                 GridItem(.fixed(tileWidth), spacing: 0),
                 GridItem(.fixed(tileWidth), spacing: 0)
@@ -35,6 +39,7 @@ struct ContentView: View {
                             hasRecording: audioManager.hasRecording(for: index),
                             isRecording: audioManager.currentRecordingTile == index,
                             playbackSpeed: audioManager.getPlaybackSpeed(for: index),
+                            activeBackIndex: $activeBackIndex,
                             onStartRecording: {
                                 audioManager.startRecording(for: index)
                             },
@@ -69,6 +74,8 @@ struct ContentView: View {
                         .id("\(index)-\(tileStates[index])-[\(refreshTrigger)]-\(audioManager.playbackSpeeds[index] ?? 1.0)")
                     }
                 }
+                .frame(width: fullWidth, height: fullHeight, alignment: .topLeading)
+                .offset(x: -safeAreaInsets.leading, y: -safeAreaInsets.top)
                 .ignoresSafeArea()
             }
         }

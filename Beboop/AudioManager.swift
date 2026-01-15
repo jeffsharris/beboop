@@ -5,6 +5,8 @@ final class AudioManager: ObservableObject {
     private var recorder: AVAudioRecorder?
     private var players: [Int: AVAudioPlayer] = [:]
     private let fileManager = FileManager.default
+    private var recordingStartDate: Date?
+    private let minimumRecordingDuration: TimeInterval = 0.5
 
     @Published var isRecording = false
     @Published var currentRecordingTile: Int?
@@ -62,6 +64,7 @@ final class AudioManager: ObservableObject {
 
             isRecording = true
             currentRecordingTile = tileIndex
+            recordingStartDate = Date()
 
             let generator = UIImpactFeedbackGenerator(style: .medium)
             generator.impactOccurred()
@@ -73,10 +76,24 @@ final class AudioManager: ObservableObject {
     func stopRecording() {
         guard isRecording else { return }
 
+        let recordedTile = currentRecordingTile
+        let recordingDuration = recordingStartDate.map { Date().timeIntervalSince($0) } ?? 0
         recorder?.stop()
         recorder = nil
         isRecording = false
         currentRecordingTile = nil
+        recordingStartDate = nil
+
+        if let tileIndex = recordedTile, recordingDuration < minimumRecordingDuration {
+            let url = audioFileURL(for: tileIndex)
+            if fileManager.fileExists(atPath: url.path) {
+                do {
+                    try fileManager.removeItem(at: url)
+                } catch {
+                    print("Failed to delete short recording: \(error)")
+                }
+            }
+        }
 
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
