@@ -31,7 +31,7 @@ platform :ios do
     xcargs_parts = []
     xcargs_parts << "DEVELOPMENT_TEAM=#{team_id}" if team_id && !team_id.empty?
     xcargs_parts << "PROVISIONING_PROFILE_SPECIFIER='#{profile_name}'" if profile_name && !profile_name.empty?
-    xcargs_parts << "CODE_SIGN_IDENTITY=Apple Distribution"
+    xcargs_parts << "CODE_SIGN_IDENTITY='Apple Distribution'"
     xcargs = xcargs_parts.join(" ")
 
     build_app(
