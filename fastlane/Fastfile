@@ -17,6 +17,10 @@ platform :ios do
       readonly: true
     )
 
+    profile_mapping = lane_context[SharedValues::MATCH_PROVISIONING_PROFILE_MAPPING] || {}
+    profile_mapping = profile_mapping.transform_keys(&:to_s)
+    profile_name = profile_mapping["com.jeffharris.beboop"]
+
     build_number = ENV["GITHUB_RUN_NUMBER"] || Time.now.to_i.to_s
     increment_build_number(
       build_number: build_number,
@@ -24,11 +28,18 @@ platform :ios do
     )
 
     team_id = ENV["TEAM_ID"]
-    xcargs = team_id && !team_id.empty? ? "DEVELOPMENT_TEAM=#{team_id}" : nil
+    xcargs_parts = []
+    xcargs_parts << "DEVELOPMENT_TEAM=#{team_id}" if team_id && !team_id.empty?
+    xcargs_parts << "PROVISIONING_PROFILE_SPECIFIER='#{profile_name}'" if profile_name && !profile_name.empty?
+    xcargs_parts << "CODE_SIGN_IDENTITY=Apple Distribution"
+    xcargs = xcargs_parts.join(" ")
 
     build_app(
       scheme: "Beboop",
       export_method: "app-store",
+      export_options: {
+        provisioningProfiles: profile_mapping
+      },
       xcargs: xcargs
     )
 
