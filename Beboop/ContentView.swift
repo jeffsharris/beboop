@@ -7,14 +7,14 @@ struct ContentView: View {
     @State private var shareURL: URL?
     @State private var showShareSheet = false
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 0),
-        GridItem(.flexible(), spacing: 0)
-    ]
-
     var body: some View {
         GeometryReader { geometry in
             let tileHeight = geometry.size.height / 5
+            let tileWidth = geometry.size.width / 2
+            let columns = [
+                GridItem(.fixed(tileWidth), spacing: 0),
+                GridItem(.fixed(tileWidth), spacing: 0)
+            ]
 
             ZStack {
                 LinearGradient(
@@ -65,7 +65,7 @@ struct ContentView: View {
                                 audioManager.resetPlaybackSpeed(for: index)
                             }
                         )
-                        .frame(height: tileHeight)
+                        .frame(width: tileWidth, height: tileHeight)
                         .id("\(index)-\(tileStates[index])-[\(refreshTrigger)]-\(audioManager.playbackSpeeds[index] ?? 1.0)")
                     }
                 }
