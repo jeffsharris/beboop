@@ -7,6 +7,7 @@ struct SoundTileView: View {
     let hasRecording: Bool
     let isRecording: Bool
     let playbackSpeed: Float
+    @Binding var activeBackIndex: Int?
     let onStartRecording: () -> Void
     let onStopRecording: () -> Void
     let onPlay: () -> Void
@@ -21,18 +22,19 @@ struct SoundTileView: View {
     @State private var dragOffset: CGSize = .zero
     @State private var recordingPulse = false
     @State private var playBounce = false
-    @State private var showBack = false
     @State private var isAdjustingSpeed = false
     @State private var speedDragStart: Float = 1.0
     @State private var loopWorkItem: DispatchWorkItem?
     @State private var isLoopingPlayback = false
+    @State private var recordingStartWorkItem: DispatchWorkItem?
 
     // Gesture thresholds
     private let tapThreshold: CGFloat = 15
     private let gestureThreshold: CGFloat = 25
     private let flipRevealThreshold: CGFloat = 60
     private let loopStartDelay: TimeInterval = 0.35
-    private let cornerRadius: CGFloat = 18
+    private let recordHoldDelay: TimeInterval = 0.25
+    private let flipAnimation = Animation.easeInOut(duration: 0.4)
 
     var body: some View {
         GeometryReader { geometry in
@@ -56,16 +58,16 @@ struct SoundTileView: View {
     @ViewBuilder
     private func mainTile(size: CGSize, minSize: CGFloat) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            Rectangle()
                 .fill(backgroundColor)
                 .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    Rectangle()
                         .stroke(color.opacity(0.3), lineWidth: hasRecording ? 0 : 2)
                 )
                 .shadow(color: color.opacity(0.4), radius: isPressed ? 4 : 8, x: 0, y: isPressed ? 2 : 4)
 
             if isRecording {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                Rectangle()
                     .stroke(color, lineWidth: 3)
                     .scaleEffect(recordingPulse ? 1.04 : 1.0)
                     .opacity(recordingPulse ? 0 : 0.8)
@@ -115,10 +117,10 @@ struct SoundTileView: View {
 
     private func backTile(size: CGSize, minSize: CGFloat) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            Rectangle()
                 .fill(color.opacity(0.7))
                 .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    Rectangle()
                         .stroke(Color.white.opacity(0.25), lineWidth: 2)
                 )
 
@@ -226,6 +228,10 @@ struct SoundTileView: View {
     private func handleDragChanged(_ value: DragGesture.Value) {
         let translation = value.translation
 
+        if closeActiveBackIfNeeded() {
+            return
+        }
+
         if showBack {
             if abs(translation.width) > gestureThreshold {
                 dragOffset = translation
@@ -239,7 +245,7 @@ struct SoundTileView: View {
             if !isPressed && !isRecording {
                 isPressed = true
                 playInteractionSound(.press)
-                onStartRecording()
+                scheduleRecordingStart()
             }
         }
     }
@@ -282,6 +288,14 @@ struct SoundTileView: View {
         let absY = abs(translation.height)
 
         cancelLoopStart()
+        cancelRecordingStart()
+
+        if closeActiveBackIfNeeded() {
+            isPressed = false
+            dragOffset = .zero
+            isAdjustingSpeed = false
+            return
+        }
 
         if isRecording {
             onStopRecording()
@@ -322,22 +336,36 @@ struct SoundTileView: View {
                 flipTileState()
             }
         } else {
-            onStopRecording()
-            playInteractionSound(.release)
+            if isPressed && isRecording {
+                onStopRecording()
+                playInteractionSound(.release)
+            }
         }
     }
 
     private func flipTileState() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-            showBack.toggle()
+        withAnimation(flipAnimation) {
+            activeBackIndex = index
         }
         playInteractionSound(.flip)
     }
 
     private func flipBack() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-            showBack = false
+        withAnimation(flipAnimation) {
+            if activeBackIndex == index {
+                activeBackIndex = nil
+            }
         }
+    }
+
+    private func closeActiveBackIfNeeded() -> Bool {
+        if let activeIndex = activeBackIndex, activeIndex != index {
+            withAnimation(flipAnimation) {
+                activeBackIndex = nil
+            }
+            return true
+        }
+        return false
     }
 
     private func scheduleLoopStart() {
@@ -357,6 +385,26 @@ struct SoundTileView: View {
         loopWorkItem = nil
     }
 
+    private var showBack: Bool {
+        activeBackIndex == index
+    }
+
+    private func scheduleRecordingStart() {
+        cancelRecordingStart()
+        let workItem = DispatchWorkItem {
+            guard isPressed && !isRecording && !hasRecording && !showBack else { return }
+            onStartRecording()
+            recordingStartWorkItem = nil
+        }
+        recordingStartWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + recordHoldDelay, execute: workItem)
+    }
+
+    private func cancelRecordingStart() {
+        recordingStartWorkItem?.cancel()
+        recordingStartWorkItem = nil
+    }
+
     // MARK: - Helpers
 
     private var backgroundColor: Color {
@@ -373,12 +421,22 @@ struct SoundTileView: View {
         ZStack {
             mainTile(size: size, minSize: minSize)
                 .opacity(showBack ? 0.0 : 1.0)
-                .rotation3DEffect(.degrees(showBack ? 180 : 0), axis: (x: 0, y: 1, z: 0))
+                .rotation3DEffect(
+                    .degrees(showBack ? 180 : 0),
+                    axis: (x: 0, y: 1, z: 0),
+                    perspective: 0.8
+                )
 
             backTile(size: size, minSize: minSize)
                 .opacity(showBack ? 1.0 : 0.0)
-                .rotation3DEffect(.degrees(showBack ? 0 : -180), axis: (x: 0, y: 1, z: 0))
+                .rotation3DEffect(
+                    .degrees(showBack ? 0 : -180),
+                    axis: (x: 0, y: 1, z: 0),
+                    perspective: 0.8
+                )
         }
+        .clipped()
+        .animation(flipAnimation, value: showBack)
     }
 
     private enum InteractionSound {
