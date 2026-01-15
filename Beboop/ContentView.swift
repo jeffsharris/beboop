@@ -4,6 +4,8 @@ struct ContentView: View {
     @StateObject private var audioManager = AudioManager()
     @State private var tileStates: [Bool] = Array(repeating: false, count: 10)
     @State private var refreshTrigger = false
+    @State private var shareURL: URL?
+    @State private var showShareSheet = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 16),
@@ -43,6 +45,7 @@ struct ContentView: View {
                             color: TileColors.color(for: index),
                             hasRecording: audioManager.hasRecording(for: index),
                             isRecording: audioManager.currentRecordingTile == index,
+                            playbackSpeed: audioManager.getPlaybackSpeed(for: index),
                             onStartRecording: {
                                 audioManager.startRecording(for: index)
                             },
@@ -56,10 +59,19 @@ struct ContentView: View {
                             onClear: {
                                 audioManager.clearRecording(for: index)
                                 refreshTileStates()
+                            },
+                            onShare: {
+                                shareTile(index: index)
+                            },
+                            onSpeedChange: { speed in
+                                audioManager.setPlaybackSpeed(for: index, speed: speed)
+                            },
+                            onResetSpeed: {
+                                audioManager.resetPlaybackSpeed(for: index)
                             }
                         )
                         .aspectRatio(1, contentMode: .fit)
-                        .id("\(index)-\(tileStates[index])-\(refreshTrigger)")
+                        .id("\(index)-\(tileStates[index])-\(refreshTrigger)-\(audioManager.playbackSpeeds[index] ?? 1.0)")
                     }
                 }
                 .padding(.horizontal, 20)
@@ -69,13 +81,18 @@ struct ContentView: View {
             }
             .padding(.top, 16)
         }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = shareURL {
+                ShareSheet(items: [url])
+            }
+        }
     }
 
     private var instructionText: String {
         if audioManager.isRecording {
             return "Recording... Release to stop"
         } else {
-            return "Hold to record, Tap to play, Swipe to clear"
+            return "Hold to record, Tap to play, Swipe for options"
         }
     }
 
@@ -86,6 +103,24 @@ struct ContentView: View {
         }
         refreshTrigger.toggle()
     }
+
+    private func shareTile(index: Int) {
+        if let url = audioManager.getShareableURL(for: index) {
+            shareURL = url
+            showShareSheet = true
+        }
+    }
+}
+
+// UIKit Share Sheet wrapper for SwiftUI
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview {

@@ -8,6 +8,12 @@ final class AudioManager: ObservableObject {
 
     @Published var isRecording = false
     @Published var currentRecordingTile: Int?
+    @Published var playbackSpeeds: [Int: Float] = [:]
+
+    // Speed limits
+    static let minSpeed: Float = 0.5
+    static let maxSpeed: Float = 2.0
+    static let defaultSpeed: Float = 1.0
 
     init() {
         setupAudioSession()
@@ -92,6 +98,8 @@ final class AudioManager: ObservableObject {
         do {
             // Create a new player for this tile (allows simultaneous playback)
             let player = try AVAudioPlayer(contentsOf: url)
+            player.enableRate = true
+            player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
             player.prepareToPlay()
             player.play()
 
@@ -111,12 +119,39 @@ final class AudioManager: ObservableObject {
         return fileManager.fileExists(atPath: url.path)
     }
 
+    // MARK: - Playback Speed
+
+    func getPlaybackSpeed(for tileIndex: Int) -> Float {
+        return playbackSpeeds[tileIndex] ?? Self.defaultSpeed
+    }
+
+    func setPlaybackSpeed(for tileIndex: Int, speed: Float) {
+        let clampedSpeed = min(max(speed, Self.minSpeed), Self.maxSpeed)
+        playbackSpeeds[tileIndex] = clampedSpeed
+
+        // Update currently playing audio if any
+        if let player = players[tileIndex], player.isPlaying {
+            player.rate = clampedSpeed
+        }
+    }
+
+    func resetPlaybackSpeed(for tileIndex: Int) {
+        playbackSpeeds[tileIndex] = Self.defaultSpeed
+
+        // Haptic feedback for reset
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+    }
+
     // MARK: - Clear Recording
 
     func clearRecording(for tileIndex: Int) {
         // Stop playback if playing
         players[tileIndex]?.stop()
         players[tileIndex] = nil
+
+        // Clear speed setting
+        playbackSpeeds[tileIndex] = nil
 
         let url = audioFileURL(for: tileIndex)
 
@@ -135,8 +170,14 @@ final class AudioManager: ObservableObject {
 
     // MARK: - File Management
 
-    private func audioFileURL(for tileIndex: Int) -> URL {
+    func audioFileURL(for tileIndex: Int) -> URL {
         let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documentsPath.appendingPathComponent("tile_\(tileIndex).m4a")
+    }
+
+    // For sharing - returns the URL if recording exists
+    func getShareableURL(for tileIndex: Int) -> URL? {
+        let url = audioFileURL(for: tileIndex)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 }
