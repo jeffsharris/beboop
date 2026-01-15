@@ -14,6 +14,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode 16
+        run: |
+          if [ -d "/Applications/Xcode_16.1.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_16.1.app/Contents/Developer"
+          elif [ -d "/Applications/Xcode_16.0.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_16.0.app/Contents/Developer"
+          else
+            echo "Xcode 16 not found in /Applications" >&2
+            ls /Applications
+            exit 1
+          fi
+          xcodebuild -version
+
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
