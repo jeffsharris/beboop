@@ -21,3 +21,6 @@ Store local secrets in `.env` and commit a `.env.example` with safe defaults. Ne
 
 ## Agent-Specific Instructions
 For major changes, propose a plan before coding. Ask for confirmation before adding new production dependencies. When requirements are under-specified, choose tasteful, playful defaults and minimize back-and-forth unless a decision is blocking.
+
+## Agent Notes
+- When adding new Swift files, register them in `Beboop.xcodeproj/project.pbxproj` (group + Sources build phase). If you only add the file on disk, CI builds will fail with missing symbol/compile errors.
