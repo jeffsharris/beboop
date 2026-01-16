@@ -7,6 +7,7 @@ final class AudioManager: NSObject, ObservableObject {
         let timePitchA: AVAudioUnitTimePitch
         let timePitchB: AVAudioUnitTimePitch
         let mixer: AVAudioMixerNode
+        let format: AVAudioFormat
     }
 
     private let engine = AVAudioEngine()
@@ -135,18 +136,20 @@ final class AudioManager: NSObject, ObservableObject {
         guard let buffer = buffer(for: tileIndex) else {
             return
         }
+        guard buffer.frameLength > 0 else {
+            return
+        }
 
-        let chain = playbackChain(for: tileIndex)
+        let chain = playbackChain(for: tileIndex, format: buffer.format)
         updateTimePitch(for: tileIndex, chain: chain)
 
         chain.player.stop()
+        ensureEngineRunning()
         chain.player.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
             DispatchQueue.main.async {
                 self?.stopPlayback(for: tileIndex)
             }
         }
-
-        ensureEngineRunning()
         if !chain.player.isPlaying {
             chain.player.play()
         }
@@ -164,8 +167,11 @@ final class AudioManager: NSObject, ObservableObject {
         guard let buffer = buffer(for: tileIndex) else {
             return
         }
+        guard buffer.frameLength > 0 else {
+            return
+        }
 
-        let chain = playbackChain(for: tileIndex)
+        let chain = playbackChain(for: tileIndex, format: buffer.format)
         updateTimePitch(for: tileIndex, chain: chain)
 
         scheduleLoop(for: tileIndex, buffer: buffer, chain: chain)
@@ -273,9 +279,23 @@ final class AudioManager: NSObject, ObservableObject {
 
     // MARK: - Playback Helpers
 
-    private func playbackChain(for tileIndex: Int) -> PlaybackChain {
-        if let chain = playbackChains[tileIndex] {
+    private func playbackChain(for tileIndex: Int, format: AVAudioFormat) -> PlaybackChain {
+        if let chain = playbackChains[tileIndex], formatsMatch(chain.format, format) {
             return chain
+        }
+
+        if let existing = playbackChains[tileIndex] {
+            stopMetering(for: tileIndex, on: existing.mixer)
+            engine.detach(existing.player)
+            engine.detach(existing.timePitchA)
+            engine.detach(existing.timePitchB)
+            engine.detach(existing.mixer)
+            playbackChains[tileIndex] = nil
+        }
+
+        let wasRunning = engine.isRunning
+        if wasRunning {
+            engine.stop()
         }
 
         let player = AVAudioPlayerNode()
@@ -288,15 +308,21 @@ final class AudioManager: NSObject, ObservableObject {
         engine.attach(timePitchB)
         engine.attach(mixer)
 
-        engine.connect(player, to: timePitchA, format: nil)
-        engine.connect(timePitchA, to: timePitchB, format: nil)
-        engine.connect(timePitchB, to: mixer, format: nil)
-        engine.connect(mixer, to: engine.mainMixerNode, format: nil)
+        engine.connect(player, to: timePitchA, format: format)
+        engine.connect(timePitchA, to: timePitchB, format: format)
+        engine.connect(timePitchB, to: mixer, format: format)
+        engine.connect(mixer, to: engine.mainMixerNode, format: format)
 
-        let chain = PlaybackChain(player: player, timePitchA: timePitchA, timePitchB: timePitchB, mixer: mixer)
+        engine.prepare()
+
+        let chain = PlaybackChain(player: player, timePitchA: timePitchA, timePitchB: timePitchB, mixer: mixer, format: format)
         playbackChains[tileIndex] = chain
         updateTimePitch(for: tileIndex, chain: chain)
-        ensureEngineRunning()
+
+        if wasRunning {
+            ensureEngineRunning()
+        }
+
         return chain
     }
 
@@ -332,6 +358,10 @@ final class AudioManager: NSObject, ObservableObject {
         chain.timePitchA.rate = rateComponent
         chain.timePitchB.rate = rateComponent
         chain.timePitchB.pitch = pitchCents(for: speed)
+    }
+
+    private func formatsMatch(_ lhs: AVAudioFormat, _ rhs: AVAudioFormat) -> Bool {
+        lhs.sampleRate == rhs.sampleRate && lhs.channelCount == rhs.channelCount
     }
 
     private func pitchCents(for speed: Float) -> Float {
