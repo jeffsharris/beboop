@@ -135,7 +135,10 @@ struct VoiceAuroraView: View {
         layerOffset: Double,
         intensity: Double
     ) -> [CGPoint] {
-        (0...segments).map { index in
+        var points: [CGPoint] = []
+        points.reserveCapacity(segments + 1)
+
+        for index in 0...segments {
             let progress = Double(index) / Double(segments)
             let x = width * CGFloat(index) / CGFloat(segments)
 
@@ -145,8 +148,10 @@ struct VoiceAuroraView: View {
             let audioWave = sin(progress * 10 * .pi + time * 2) * intensity * 80
 
             let y = baseY + wave1 + wave2 + wave3 + audioWave
-            return CGPoint(x: x, y: y)
+            points.append(CGPoint(x: x, y: y))
         }
+
+        return points
     }
 
     private func calculateRibbonColor(time: Double, layer: Int, pitch: Double, intensity: Double) -> Color {
