@@ -414,29 +414,6 @@ final class ChimePlayer: ObservableObject {
             engine.attach(sampler)
             engine.connect(sampler, to: engine.mainMixerNode, format: nil)
 
-            // Load a nice bell/chime sound from the built-in sounds
-            try sampler.loadInstrument(at: URL(fileURLWithPath: "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/MusicalInstrumentsSampleBank/MusicBells.sf2"))
-
-            engine.prepare()
-            try engine.start()
-
-            self.audioEngine = engine
-            self.sampler = sampler
-            self.isSetup = true
-        } catch {
-            // Fallback: try loading default sound bank
-            setupFallbackAudio()
-        }
-    }
-
-    private func setupFallbackAudio() {
-        do {
-            let engine = AVAudioEngine()
-            let sampler = AVAudioUnitSampler()
-
-            engine.attach(sampler)
-            engine.connect(sampler, to: engine.mainMixerNode, format: nil)
-
             // Use default General MIDI sounds (instrument 14 is tubular bells)
             sampler.sendProgramChange(14, bankMSB: UInt8(kAUSampler_DefaultMelodicBankMSB),
                                        bankLSB: UInt8(kAUSampler_DefaultBankLSB), onChannel: 0)
