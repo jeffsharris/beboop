@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import CoreMotion
 
 struct HighContrastMobileView: View {
     private struct ShapeState: Identifiable {
@@ -39,6 +40,7 @@ struct HighContrastMobileView: View {
 
     // Audio
     @StateObject private var chimePlayer = ChimePlayer()
+    @StateObject private var motionController = MotionController()
 
     // Size and speed limits
     private let minShapeScale: CGFloat = 0.6
@@ -55,6 +57,15 @@ struct HighContrastMobileView: View {
     private let maxVelocity: CGFloat = 900  // Cap velocity to keep things playable
     private let collisionRestitution: CGFloat = 0.9
     private let collisionCooldown: TimeInterval = 0.12
+    private let wallAccelerationScale: CGFloat = 1400
+    private let wallVelocityDamping: CGFloat = 0.9
+    private let wallVelocityMax: CGFloat = 600
+    private let wallOffsetMax: CGFloat = 28
+    private let wallAccelerationThreshold: CGFloat = 0.03
+    private let wallOffsetDamping: CGFloat = 0.92
+
+    @State private var wallVelocity: CGPoint = .zero
+    @State private var wallOffset: CGPoint = .zero
 
     @State private var lastCollisionTimes: [String: Date] = [:]
 
@@ -77,12 +88,16 @@ struct HighContrastMobileView: View {
                 .onAppear {
                     screenSize = geometry.size
                     initializeShapesIfNeeded(in: geometry.size)
+                    motionController.start()
                 }
                 .onChange(of: geometry.size) { _, newSize in
                     let oldSize = screenSize
                     screenSize = newSize
                     updateShapesForResize(from: oldSize, to: newSize)
                     initializeShapesIfNeeded(in: newSize)
+                }
+                .onDisappear {
+                    motionController.stop()
                 }
                 .gesture(combinedGesture)
             }
@@ -313,6 +328,8 @@ struct HighContrastMobileView: View {
             return
         }
 
+        updateWallMotion(dt: dt)
+
         for i in shapes.indices {
             if draggedShapeIndex == i || adjustingShapeIndex == i { continue }
 
@@ -353,33 +370,47 @@ struct HighContrastMobileView: View {
             var velocity = isDragged ? dragVelocity : shape.velocity
             var didHitWall = false
             let bounds = polygonBounds(worldContour(for: shape))
+            let wallBounds = currentWallBounds()
+            let wallVelocityLeft = max(wallVelocity.x, 0)
+            let wallVelocityRight = min(wallVelocity.x, 0)
+            let wallVelocityTop = max(wallVelocity.y, 0)
+            let wallVelocityBottom = min(wallVelocity.y, 0)
+            var impactSpeed: CGFloat = 0
 
             var offset = CGPoint.zero
-            if bounds.minX < 0 {
-                offset.x = -bounds.minX
-                if velocity.x < 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : -velocity.x * collisionRestitution
+            if bounds.minX < wallBounds.minX {
+                offset.x = wallBounds.minX - bounds.minX
+                let relative = velocity.x - wallVelocityLeft
+                if relative < 0 {
+                    velocity.x = isDragged || isAdjusting ? 0 : wallVelocityLeft - relative * collisionRestitution
                     didHitWall = true
+                    impactSpeed = max(impactSpeed, abs(relative))
                 }
-            } else if bounds.maxX > screenSize.width {
-                offset.x = screenSize.width - bounds.maxX
-                if velocity.x > 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : -velocity.x * collisionRestitution
+            } else if bounds.maxX > wallBounds.maxX {
+                offset.x = wallBounds.maxX - bounds.maxX
+                let relative = velocity.x - wallVelocityRight
+                if relative > 0 {
+                    velocity.x = isDragged || isAdjusting ? 0 : wallVelocityRight - relative * collisionRestitution
                     didHitWall = true
+                    impactSpeed = max(impactSpeed, abs(relative))
                 }
             }
 
-            if bounds.minY < 0 {
-                offset.y = -bounds.minY
-                if velocity.y < 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : -velocity.y * collisionRestitution
+            if bounds.minY < wallBounds.minY {
+                offset.y = wallBounds.minY - bounds.minY
+                let relative = velocity.y - wallVelocityTop
+                if relative < 0 {
+                    velocity.y = isDragged || isAdjusting ? 0 : wallVelocityTop - relative * collisionRestitution
                     didHitWall = true
+                    impactSpeed = max(impactSpeed, abs(relative))
                 }
-            } else if bounds.maxY > screenSize.height {
-                offset.y = screenSize.height - bounds.maxY
-                if velocity.y > 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : -velocity.y * collisionRestitution
+            } else if bounds.maxY > wallBounds.maxY {
+                offset.y = wallBounds.maxY - bounds.maxY
+                let relative = velocity.y - wallVelocityBottom
+                if relative > 0 {
+                    velocity.y = isDragged || isAdjusting ? 0 : wallVelocityBottom - relative * collisionRestitution
                     didHitWall = true
+                    impactSpeed = max(impactSpeed, abs(relative))
                 }
             }
 
@@ -387,7 +418,6 @@ struct HighContrastMobileView: View {
             shape.position.y += offset.y
 
             if didHitWall {
-                let impactSpeed = max(abs(velocity.x), abs(velocity.y))
                 playBounceChime(for: shape, velocity: impactSpeed)
             }
 
@@ -541,6 +571,75 @@ struct HighContrastMobileView: View {
             velocity.x *= scale
             velocity.y *= scale
         }
+    }
+
+    private func clampVector(_ vector: inout CGPoint, maxMagnitude: CGFloat) {
+        let speed = sqrt(vector.x * vector.x + vector.y * vector.y)
+        if speed > maxMagnitude {
+            let scale = maxMagnitude / speed
+            vector.x *= scale
+            vector.y *= scale
+        }
+    }
+
+    private func updateWallMotion(dt: TimeInterval) {
+        let orientation = currentInterfaceOrientation()
+        var acceleration = accelerationVector(from: motionController.latestAcceleration, orientation: orientation)
+        let magnitude = sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y)
+        if magnitude < wallAccelerationThreshold {
+            acceleration = .zero
+        }
+
+        wallVelocity.x += acceleration.x * wallAccelerationScale * CGFloat(dt)
+        wallVelocity.y += acceleration.y * wallAccelerationScale * CGFloat(dt)
+        wallVelocity.x *= wallVelocityDamping
+        wallVelocity.y *= wallVelocityDamping
+        clampVector(&wallVelocity, maxMagnitude: wallVelocityMax)
+
+        wallOffset.x += wallVelocity.x * CGFloat(dt)
+        wallOffset.y += wallVelocity.y * CGFloat(dt)
+        wallOffset.x *= wallOffsetDamping
+        wallOffset.y *= wallOffsetDamping
+        wallOffset.x = wallOffset.x.clamped(to: -wallOffsetMax...wallOffsetMax)
+        wallOffset.y = wallOffset.y.clamped(to: -wallOffsetMax...wallOffsetMax)
+    }
+
+    private func currentWallBounds() -> CGRect {
+        let leftInset = max(0, wallOffset.x)
+        let rightInset = max(0, -wallOffset.x)
+        let topInset = max(0, wallOffset.y)
+        let bottomInset = max(0, -wallOffset.y)
+        let width = max(1, screenSize.width - leftInset - rightInset)
+        let height = max(1, screenSize.height - topInset - bottomInset)
+        return CGRect(x: leftInset, y: topInset, width: width, height: height)
+    }
+
+    private func accelerationVector(from acceleration: CMAcceleration,
+                                    orientation: UIInterfaceOrientation) -> CGPoint {
+        let x = CGFloat(acceleration.x)
+        let y = CGFloat(acceleration.y)
+
+        switch orientation {
+        case .portrait:
+            return CGPoint(x: x, y: -y)
+        case .portraitUpsideDown:
+            return CGPoint(x: -x, y: y)
+        case .landscapeLeft:
+            return CGPoint(x: y, y: x)
+        case .landscapeRight:
+            return CGPoint(x: -y, y: -x)
+        default:
+            return CGPoint(x: x, y: -y)
+        }
+    }
+
+    private func currentInterfaceOrientation() -> UIInterfaceOrientation {
+        for scene in UIApplication.shared.connectedScenes {
+            if let windowScene = scene as? UIWindowScene {
+                return windowScene.interfaceOrientation
+            }
+        }
+        return .portrait
     }
 
     private func shapeArea(for shape: ShapeState) -> CGFloat {
@@ -878,6 +977,26 @@ private final class PassthroughTwoFingerView: UIView {
 private extension CGFloat {
     func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
         Swift.min(range.upperBound, Swift.max(range.lowerBound, self))
+    }
+}
+
+@MainActor
+final class MotionController: ObservableObject {
+    private let motionManager = CMMotionManager()
+    private(set) var latestAcceleration = CMAcceleration(x: 0, y: 0, z: 0)
+
+    func start() {
+        guard motionManager.isDeviceMotionAvailable else { return }
+
+        motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
+        motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+            guard let motion else { return }
+            self?.latestAcceleration = motion.userAcceleration
+        }
+    }
+
+    func stop() {
+        motionManager.stopDeviceMotionUpdates()
     }
 }
 
