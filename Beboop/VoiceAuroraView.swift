@@ -98,32 +98,54 @@ struct VoiceAuroraView: View {
     }
 
     private func createRibbonPath(size: CGSize, time: Double, layer: Int, layerOffset: Double, intensity: Double) -> Path {
-        Path { path in
-            let segments = 60
-            let baseY = size.height * (0.3 + layerOffset * 0.4)
-            let layerSpeed = 0.5 + Double(layer) * 0.1
+        let segments = 60
+        let baseY = size.height * (0.3 + layerOffset * 0.4)
+        let layerSpeed = 0.5 + Double(layer) * 0.1
+        let points = ribbonPoints(
+            segments: segments,
+            width: size.width,
+            baseY: baseY,
+            time: time,
+            layerSpeed: layerSpeed,
+            layerOffset: layerOffset,
+            intensity: intensity
+        )
 
-            for i in 0...segments {
-                let x = size.width * CGFloat(i) / CGFloat(segments)
-                let progress = Double(i) / Double(segments)
-
-                let wave1 = sin(progress * 4 * .pi + time * layerSpeed) * 40
-                let wave2 = sin(progress * 7 * .pi + time * 0.7 + layerOffset) * 25
-                let wave3 = sin(progress * 2 * .pi + time * 0.3) * 60
-                let audioWave = sin(progress * 10 * .pi + time * 2) * intensity * 80
-
-                let y = baseY + wave1 + wave2 + wave3 + audioWave
-
-                if i == 0 {
-                    path.move(to: CGPoint(x: x, y: y))
+        return Path { path in
+            for (index, point) in points.enumerated() {
+                if index == 0 {
+                    path.move(to: point)
                 } else {
-                    path.addLine(to: CGPoint(x: x, y: y))
+                    path.addLine(to: point)
                 }
             }
 
             path.addLine(to: CGPoint(x: size.width, y: size.height + 50))
             path.addLine(to: CGPoint(x: 0, y: size.height + 50))
             path.closeSubpath()
+        }
+    }
+
+    private func ribbonPoints(
+        segments: Int,
+        width: CGFloat,
+        baseY: CGFloat,
+        time: Double,
+        layerSpeed: Double,
+        layerOffset: Double,
+        intensity: Double
+    ) -> [CGPoint] {
+        (0...segments).map { index in
+            let progress = Double(index) / Double(segments)
+            let x = width * CGFloat(index) / CGFloat(segments)
+
+            let wave1 = sin(progress * 4 * .pi + time * layerSpeed) * 40
+            let wave2 = sin(progress * 7 * .pi + time * 0.7 + layerOffset) * 25
+            let wave3 = sin(progress * 2 * .pi + time * 0.3) * 60
+            let audioWave = sin(progress * 10 * .pi + time * 2) * intensity * 80
+
+            let y = baseY + wave1 + wave2 + wave3 + audioWave
+            return CGPoint(x: x, y: y)
         }
     }
 

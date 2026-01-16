@@ -31,6 +31,7 @@ struct HighContrastMobileView: View {
     // User-controlled parameters
     @State private var speedMultiplier: CGFloat = 1.0
     @State private var sizeMultiplier: CGFloat = 1.0
+    @State private var baselineSpeedMultiplier: CGFloat = 1.0
 
     // Gesture tracking
     @State private var isDragging = false
@@ -52,19 +53,25 @@ struct HighContrastMobileView: View {
     private let maxSpeed: CGFloat = 3.0
     private let minSize: CGFloat = 0.5
     private let maxSize: CGFloat = 2.0
+    private let minBaselineSpeed: CGFloat = 0.2
+    private let maxBaselineSpeed: CGFloat = 2.5
 
     // Physics
-    private let friction: CGFloat = 0.995  // Slight friction to eventually slow things down
-    private let maxVelocity: CGFloat = 800  // Cap velocity to keep things playable
+    private let damping: CGFloat = 0.985
+    private let maxVelocity: CGFloat = 900  // Cap velocity to keep things playable
+    private let collisionRestitution: CGFloat = 0.9
+    private let collisionCooldown: TimeInterval = 0.12
 
-    // Initial shape configurations (bigger than before)
+    // Initial shape configurations
     private let initialConfigs: [(ShapeState.Kind, CGPoint, CGSize, CGFloat, Angle)] = [
-        (.circle, CGPoint(x: 0.15, y: 0.2), CGSize(width: 0.28, height: 0.28), 80, .degrees(0)),
-        (.roundedRect, CGPoint(x: 0.6, y: 0.4), CGSize(width: 0.32, height: 0.22), 65, .degrees(15)),
-        (.capsule, CGPoint(x: 0.3, y: 0.7), CGSize(width: 0.35, height: 0.18), 70, .degrees(-10)),
-        (.blob, CGPoint(x: 0.75, y: 0.25), CGSize(width: 0.30, height: 0.26), 55, .degrees(8)),
-        (.circle, CGPoint(x: 0.5, y: 0.85), CGSize(width: 0.24, height: 0.24), 90, .degrees(0))
+        (.circle, CGPoint(x: 0.15, y: 0.2), CGSize(width: 0.22, height: 0.22), 80, .degrees(0)),
+        (.roundedRect, CGPoint(x: 0.6, y: 0.4), CGSize(width: 0.26, height: 0.18), 65, .degrees(15)),
+        (.capsule, CGPoint(x: 0.3, y: 0.7), CGSize(width: 0.28, height: 0.15), 70, .degrees(-10)),
+        (.blob, CGPoint(x: 0.75, y: 0.25), CGSize(width: 0.24, height: 0.2), 55, .degrees(8)),
+        (.circle, CGPoint(x: 0.5, y: 0.85), CGSize(width: 0.2, height: 0.2), 90, .degrees(0))
     ]
+
+    @State private var lastCollisionTimes: [String: Date] = [:]
 
     var body: some View {
         ZStack {
@@ -136,9 +143,10 @@ struct HighContrastMobileView: View {
                 y: location.y - dragStart.y
             )
 
-            // Vertical drag controls speed
+            // Vertical drag controls baseline speed
             let speedDelta = -delta.y / 200.0
-            speedMultiplier = min(maxSpeed, max(minSpeed, 1.0 + speedDelta))
+            baselineSpeedMultiplier = min(maxBaselineSpeed, max(minBaselineSpeed, 1.0 + speedDelta))
+            speedMultiplier = baselineSpeedMultiplier
 
             // Horizontal drag controls size
             let sizeDelta = delta.x / 200.0
@@ -155,7 +163,7 @@ struct HighContrastMobileView: View {
                 let dy = value.location.y - lastDragPosition.y
 
                 // Scale velocity based on recent movement
-                let flingMultiplier: CGFloat = 8.0
+                let flingMultiplier: CGFloat = 6.0
                 var newVelocity = CGPoint(
                     x: dx / dt * flingMultiplier,
                     y: dy / dt * flingMultiplier
@@ -169,6 +177,12 @@ struct HighContrastMobileView: View {
                     newVelocity.y *= scale
                 }
 
+                let speed = sqrt(newVelocity.x * newVelocity.x + newVelocity.y * newVelocity.y)
+                if speed < baselineSpeed {
+                    let scale = baselineSpeed / max(speed, 0.01)
+                    newVelocity.x *= scale
+                    newVelocity.y *= scale
+                }
                 shapes[shapeIndex].velocity = newVelocity
             }
         }
@@ -202,7 +216,7 @@ struct HighContrastMobileView: View {
         VStack(spacing: 8) {
             HStack(spacing: 16) {
                 Label {
-                    Text(String(format: "%.1fx", speedMultiplier))
+                    Text(String(format: "%.1fx", baselineSpeedMultiplier))
                         .monospacedDigit()
                 } icon: {
                     Image(systemName: "speedometer")
@@ -224,10 +238,6 @@ struct HighContrastMobileView: View {
                     .fill(.white.opacity(0.9))
                     .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
             )
-
-            Text("Drag up/down: speed  |  left/right: size")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.black.opacity(0.5))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, 60)
@@ -242,9 +252,10 @@ struct HighContrastMobileView: View {
             let (kind, startNorm, baseSize, speed, rotation) = config
             // Randomize initial velocity direction
             let angle = Double.random(in: 0..<(2 * .pi))
+            let baselineSpeed = speed * baselineSpeedMultiplier
             let velocity = CGPoint(
-                x: cos(angle) * speed,
-                y: sin(angle) * speed
+                x: cos(angle) * baselineSpeed,
+                y: sin(angle) * baselineSpeed
             )
             return ShapeState(
                 kind: kind,
@@ -264,15 +275,31 @@ struct HighContrastMobileView: View {
             return
         }
 
+        resolveShapeCollisions()
+
         for i in shapes.indices {
             // Skip shape being dragged
             if draggedShapeIndex == i { continue }
 
             var shape = shapes[i]
 
-            // Apply friction
-            shape.velocity.x *= friction
-            shape.velocity.y *= friction
+            // Apply damping and ease back toward baseline speed
+            shape.velocity.x *= damping
+            shape.velocity.y *= damping
+
+            let currentSpeed = sqrt(shape.velocity.x * shape.velocity.x + shape.velocity.y * shape.velocity.y)
+            if currentSpeed < baselineSpeed {
+                let target = baselineSpeed
+                if currentSpeed > 0.01 {
+                    let scale = target / currentSpeed
+                    shape.velocity.x *= scale
+                    shape.velocity.y *= scale
+                } else {
+                    let angle = Double.random(in: 0..<(2 * .pi))
+                    shape.velocity.x = cos(angle) * target
+                    shape.velocity.y = sin(angle) * target
+                }
+            }
 
             // Calculate effective size for collision
             let minDim = min(screenSize.width, screenSize.height)
@@ -289,13 +316,13 @@ struct HighContrastMobileView: View {
             if shape.position.x - halfW < 0 {
                 shape.position.x = halfW
                 if shape.velocity.x < 0 {
-                    shape.velocity.x = -shape.velocity.x
+                    shape.velocity.x = -shape.velocity.x * collisionRestitution
                     playBounceChime(for: shape.kind, velocity: abs(shape.velocity.x))
                 }
             } else if shape.position.x + halfW > screenSize.width {
                 shape.position.x = screenSize.width - halfW
                 if shape.velocity.x > 0 {
-                    shape.velocity.x = -shape.velocity.x
+                    shape.velocity.x = -shape.velocity.x * collisionRestitution
                     playBounceChime(for: shape.kind, velocity: abs(shape.velocity.x))
                 }
             }
@@ -304,13 +331,13 @@ struct HighContrastMobileView: View {
             if shape.position.y - halfH < 0 {
                 shape.position.y = halfH
                 if shape.velocity.y < 0 {
-                    shape.velocity.y = -shape.velocity.y
+                    shape.velocity.y = -shape.velocity.y * collisionRestitution
                     playBounceChime(for: shape.kind, velocity: abs(shape.velocity.y))
                 }
             } else if shape.position.y + halfH > screenSize.height {
                 shape.position.y = screenSize.height - halfH
                 if shape.velocity.y > 0 {
-                    shape.velocity.y = -shape.velocity.y
+                    shape.velocity.y = -shape.velocity.y * collisionRestitution
                     playBounceChime(for: shape.kind, velocity: abs(shape.velocity.y))
                 }
             }
@@ -319,6 +346,77 @@ struct HighContrastMobileView: View {
         }
 
         lastUpdateTime = date
+    }
+
+    private var baselineSpeed: CGFloat {
+        baselineSpeedMultiplier * 80
+    }
+
+    private func resolveShapeCollisions() {
+        guard shapes.count > 1 else { return }
+
+        let now = Date()
+        for i in 0..<(shapes.count - 1) {
+            for j in (i + 1)..<shapes.count {
+                let a = shapes[i]
+                let b = shapes[j]
+                let minDim = min(screenSize.width, screenSize.height)
+                let aRadius = minDim * max(a.baseSize.width, a.baseSize.height) * sizeMultiplier * 0.5
+                let bRadius = minDim * max(b.baseSize.width, b.baseSize.height) * sizeMultiplier * 0.5
+
+                let dx = b.position.x - a.position.x
+                let dy = b.position.y - a.position.y
+                let distance = sqrt(dx * dx + dy * dy)
+                let minDistance = aRadius + bRadius
+
+                guard distance > 0, distance < minDistance else { continue }
+
+                let key = "\(min(a.id.uuidString, b.id.uuidString))-\(max(a.id.uuidString, b.id.uuidString))"
+                if let last = lastCollisionTimes[key], now.timeIntervalSince(last) < collisionCooldown {
+                    continue
+                }
+                lastCollisionTimes[key] = now
+
+                let nx = dx / distance
+                let ny = dy / distance
+
+                var va = a.velocity
+                var vb = b.velocity
+
+                let relativeVelocity = (vb.x - va.x) * nx + (vb.y - va.y) * ny
+                if relativeVelocity > 0 {
+                    continue
+                }
+
+                let impulse = -(1 + collisionRestitution) * relativeVelocity / 2
+                let impulseX = impulse * nx
+                let impulseY = impulse * ny
+
+                va.x -= impulseX
+                va.y -= impulseY
+                vb.x += impulseX
+                vb.y += impulseY
+
+                let overlap = minDistance - distance
+                let separation = overlap / 2
+                let newAPosition = CGPoint(
+                    x: a.position.x - nx * separation,
+                    y: a.position.y - ny * separation
+                )
+                let newBPosition = CGPoint(
+                    x: b.position.x + nx * separation,
+                    y: b.position.y + ny * separation
+                )
+
+                shapes[i].position = newAPosition
+                shapes[i].velocity = va
+                shapes[j].position = newBPosition
+                shapes[j].velocity = vb
+
+                playBounceChime(for: a.kind, velocity: abs(relativeVelocity) * 0.5)
+                playBounceChime(for: b.kind, velocity: abs(relativeVelocity) * 0.5)
+            }
+        }
     }
 
     private func playBounceChime(for kind: ShapeState.Kind, velocity: CGFloat) {
