@@ -1,5 +1,7 @@
 import SwiftUI
 import AVFoundation
+import CoreAudioTypes
+import CoreMedia
 
 struct VoiceAuroraView: View {
     private enum Edge {
@@ -275,21 +277,31 @@ struct VoiceAuroraView: View {
 
 // MARK: - Audio Processor
 
-@MainActor
-final class AuroraAudioProcessor: ObservableObject {
+final class AuroraAudioProcessor: NSObject, ObservableObject {
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
     @Published var sourcePoint: CGPoint = CGPoint(x: 0.5, y: 0.9)
 
+    private let captureQueue = DispatchQueue(label: "VoiceAurora.Capture")
+    private let foaLayoutTag: AudioChannelLayoutTag = AudioChannelLayoutTag(kAudioChannelLayoutTag_HOA_ACN_SN3D | 4)
+
+    private var captureSession: AVCaptureSession?
+    private var captureInput: AVCaptureDeviceInput?
+    private var captureOutput: AVCaptureAudioDataOutput?
+
     private var audioEngine: AVAudioEngine?
+    private var playerNode: AVAudioPlayerNode?
     private var gateMixer: AVAudioMixerNode?
     private var delayNode: AVAudioUnitDelay?
     private var boostNode: AVAudioUnitEQ?
+    private var playbackFormat: AVAudioFormat?
+    private var pendingBuffers = 0
+    private let maxPendingBuffers = 4
     private var isListening = false
     private var levelHistory: [Float] = []
     private let levelHistorySize = 8
     private var echoMix: Float = 0
-    private var isBuiltInMic = true
+    private var lastDirectionPoint = CGPoint(x: 0.5, y: 0.85)
 
     private let echoGateThreshold: Float = 0.1
     private let echoGateAttack: Float = 0.75
@@ -301,6 +313,7 @@ final class AuroraAudioProcessor: ObservableObject {
     private let duckingStrength: Float = 0.35
     private let duckingResponse: Float = 0.18
     private let duckingLevelScale: Float = 0.6
+    private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
     private var duckingLevel: Float = 1.0
 
@@ -310,7 +323,9 @@ final class AuroraAudioProcessor: ObservableObject {
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
                 if granted {
-                    self?.setupAudioEngine()
+                    self?.startSpatialCapture()
+                } else {
+                    print("Microphone permission denied")
                 }
             }
         }
@@ -318,57 +333,54 @@ final class AuroraAudioProcessor: ObservableObject {
 
     func stopListening() {
         isListening = false
-        audioEngine?.stop()
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine = nil
-        gateMixer = nil
-        delayNode = nil
-        boostNode = nil
+        captureOutput?.setSampleBufferDelegate(nil, queue: nil)
+        captureSession?.stopRunning()
+        captureSession = nil
+        captureInput = nil
+        captureOutput = nil
+        captureQueue.async { [weak self] in
+            self?.stopPlaybackEngine()
+        }
     }
 
-    private func setupAudioEngine() {
+    private func startSpatialCapture() {
         do {
             let session = AVAudioSession.sharedInstance()
             try configureAudioSession(session)
 
-            isBuiltInMic = session.currentRoute.inputs.contains { $0.portType == .builtInMic }
+            let sessionCapture = AVCaptureSession()
+            sessionCapture.automaticallyConfiguresApplicationAudioSession = false
+            sessionCapture.beginConfiguration()
 
-            let engine = AVAudioEngine()
-            let inputNode = engine.inputNode
-            let format = inputNode.outputFormat(forBus: 0)
-
-            let gateMixer = AVAudioMixerNode()
-            gateMixer.outputVolume = 0
-
-            let delay = AVAudioUnitDelay()
-            delay.delayTime = 0.5
-            delay.feedback = echoFeedback
-            delay.lowPassCutoff = 12000
-            delay.wetDryMix = 50
-
-            let boost = AVAudioUnitEQ(numberOfBands: 1)
-            boost.globalGain = echoBoostDb
-
-            engine.attach(gateMixer)
-            engine.attach(delay)
-            engine.attach(boost)
-            engine.connect(inputNode, to: gateMixer, format: format)
-            engine.connect(gateMixer, to: delay, format: format)
-            engine.connect(delay, to: boost, format: format)
-            engine.connect(boost, to: engine.mainMixerNode, format: format)
-
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-                self?.processAudioBuffer(buffer)
+            guard let device = AVCaptureDevice.default(for: .audio) else {
+                print("No audio capture device found")
+                return
             }
 
-            engine.prepare()
-            try engine.start()
+            let input = try AVCaptureDeviceInput(device: device)
+            input.multichannelAudioMode = .firstOrderAmbisonics
+            guard sessionCapture.canAddInput(input) else {
+                print("Unable to add audio capture input")
+                return
+            }
+            sessionCapture.addInput(input)
 
-            self.audioEngine = engine
-            self.gateMixer = gateMixer
-            self.delayNode = delay
-            self.boostNode = boost
-            self.isListening = true
+            let output = AVCaptureAudioDataOutput()
+            output.spatialAudioChannelLayoutTag = foaLayoutTag
+            output.setSampleBufferDelegate(self, queue: captureQueue)
+            guard sessionCapture.canAddOutput(output) else {
+                print("Unable to add audio capture output")
+                return
+            }
+            sessionCapture.addOutput(output)
+
+            sessionCapture.commitConfiguration()
+            sessionCapture.startRunning()
+
+            captureSession = sessionCapture
+            captureInput = input
+            captureOutput = output
+            isListening = true
         } catch {
             print("Aurora audio setup failed: \(error)")
         }
@@ -386,42 +398,120 @@ final class AuroraAudioProcessor: ObservableObject {
         }
     }
 
-    private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
+    private func stopPlaybackEngine() {
+        audioEngine?.stop()
+        audioEngine = nil
+        playerNode = nil
+        gateMixer = nil
+        delayNode = nil
+        boostNode = nil
+        playbackFormat = nil
+        pendingBuffers = 0
+    }
 
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return }
-
-        let channelCount = Int(buffer.format.channelCount)
-        let rmsLeft = rmsLevel(channelData[0], frames: frames)
-        var rms = rmsLeft
-        var targetPoint = CGPoint(x: 0.5, y: 0.9)
-
-        if channelCount > 1, isBuiltInMic {
-            let rmsRight = rmsLevel(channelData[1], frames: frames)
-            rms = (rmsLeft + rmsRight) * 0.5
-            let balance = (rmsLeft - rmsRight) / max(0.0001, rmsLeft + rmsRight)
-            let x = (0.5 + CGFloat(balance) * 0.35).clamped(to: 0.1...0.9)
-            targetPoint = CGPoint(x: x, y: 0.85)
+    private func ensurePlaybackEngine(sampleRate: Double) {
+        if let playbackFormat = playbackFormat, abs(playbackFormat.sampleRate - sampleRate) < 0.5 {
+            return
         }
 
+        stopPlaybackEngine()
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        let gateMixer = AVAudioMixerNode()
+        gateMixer.outputVolume = 0
+
+        let delay = AVAudioUnitDelay()
+        delay.delayTime = 0.5
+        delay.feedback = echoFeedback
+        delay.lowPassCutoff = 12000
+        delay.wetDryMix = 50
+
+        let boost = AVAudioUnitEQ(numberOfBands: 1)
+        boost.globalGain = echoBoostDb
+
+        engine.attach(player)
+        engine.attach(gateMixer)
+        engine.attach(delay)
+        engine.attach(boost)
+        engine.connect(player, to: gateMixer, format: format)
+        engine.connect(gateMixer, to: delay, format: format)
+        engine.connect(delay, to: boost, format: format)
+        engine.connect(boost, to: engine.mainMixerNode, format: format)
+
+        engine.prepare()
+        do {
+            try engine.start()
+            player.play()
+            self.audioEngine = engine
+            self.playerNode = player
+            self.gateMixer = gateMixer
+            self.delayNode = delay
+            self.boostNode = boost
+            self.playbackFormat = format
+        } catch {
+            print("Aurora playback engine failed: \(error)")
+        }
+    }
+
+    private func processSpatialSamples(frames: Int,
+                                       sampleRate: Double,
+                                       sampleAt: (_ frame: Int, _ channel: Int) -> Float) {
+        guard frames > 0 else { return }
+        ensurePlaybackEngine(sampleRate: sampleRate)
+        guard let playbackFormat = playbackFormat else { return }
+
+        let frameCount = AVAudioFrameCount(frames)
+        guard let playbackBuffer = AVAudioPCMBuffer(pcmFormat: playbackFormat, frameCapacity: frameCount),
+              let playbackData = playbackBuffer.floatChannelData?.pointee else {
+            return
+        }
+
+        var sumW2: Float = 0
+        var sumXW: Float = 0
+        var sumYW: Float = 0
+        var sumZW: Float = 0
+        var zeroCrossings = 0
+        var previous = sampleAt(0, 0)
+
+        for i in 0..<frames {
+            let w = sampleAt(i, 0)
+            let y = sampleAt(i, 1)
+            let z = sampleAt(i, 2)
+            let x = sampleAt(i, 3)
+
+            playbackData[i] = w
+
+            sumW2 += w * w
+            sumXW += x * w
+            sumYW += y * w
+            sumZW += z * w
+
+            if i > 0 {
+                if (w >= 0 && previous < 0) || (w < 0 && previous >= 0) {
+                    zeroCrossings += 1
+                }
+            }
+            previous = w
+        }
+
+        playbackBuffer.frameLength = frameCount
+        enqueuePlayback(playbackBuffer)
+
+        let rms = sqrt(sumW2 / Float(frames))
         let normalizedLevel = min(1.0, rms * 8.0)
         let curvedLevel = pow(normalizedLevel, 0.7)
 
-        var zeroCrossings = 0
-        let data = channelData[0]
-        for i in 1..<frames {
-            let current = data[i]
-            let previous = data[i - 1]
-            if (current >= 0 && previous < 0) || (current < 0 && previous >= 0) {
-                zeroCrossings += 1
-            }
-        }
-
-        let sampleRate = buffer.format.sampleRate
         let estimatedFreq = (Double(zeroCrossings) / 2.0) * sampleRate / Double(frames)
         let logFreq = log2(estimatedFreq / 100.0) / 3.3
         let normalizedPitch = Float(min(1.0, max(0.0, logFreq)))
+
+        let directionPoint = resolveDirectionPoint(sumXW: sumXW,
+                                                   sumYW: sumYW,
+                                                   sumZW: sumZW,
+                                                   energy: sumW2,
+                                                   level: normalizedLevel)
 
         let targetEcho: Float = curvedLevel > echoGateThreshold ? 1.0 : 0.0
         if targetEcho > echoMix {
@@ -436,6 +526,10 @@ final class AuroraAudioProcessor: ObservableObject {
         let duckedMix = echoMix * duckingLevel
         let duckedGain = echoBoostDb * duckingLevel
 
+        gateMixer?.outputVolume = duckedMix
+        delayNode?.wetDryMix = echoWetMixBase + echoWetMixRange * duckedMix
+        boostNode?.globalGain = duckedGain
+
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
@@ -446,23 +540,160 @@ final class AuroraAudioProcessor: ObservableObject {
             self.smoothedLevel = self.levelHistory.reduce(0, +) / Float(self.levelHistory.count)
             self.dominantPitch = self.dominantPitch * 0.85 + normalizedPitch * 0.15
 
-            let nextX = self.sourcePoint.x * (1 - self.sourceSmoothing) + targetPoint.x * self.sourceSmoothing
-            let nextY = self.sourcePoint.y * (1 - self.sourceSmoothing) + targetPoint.y * self.sourceSmoothing
+            let nextX = self.sourcePoint.x * (1 - self.sourceSmoothing) + directionPoint.x * self.sourceSmoothing
+            let nextY = self.sourcePoint.y * (1 - self.sourceSmoothing) + directionPoint.y * self.sourceSmoothing
             self.sourcePoint = CGPoint(x: nextX, y: nextY)
-
-            self.gateMixer?.outputVolume = duckedMix
-            self.delayNode?.wetDryMix = self.echoWetMixBase + self.echoWetMixRange * duckedMix
-            self.boostNode?.globalGain = duckedGain
         }
     }
 
-    private func rmsLevel(_ data: UnsafePointer<Float>, frames: Int) -> Float {
-        var sum: Float = 0
-        for i in 0..<frames {
-            let value = data[i]
-            sum += value * value
+    private func resolveDirectionPoint(sumXW: Float,
+                                       sumYW: Float,
+                                       sumZW: Float,
+                                       energy: Float,
+                                       level: Float) -> CGPoint {
+        guard energy > 0 else { return lastDirectionPoint }
+
+        let intensityMagnitude = sqrt(sumXW * sumXW + sumYW * sumYW + sumZW * sumZW)
+        let confidence = min(1.0, intensityMagnitude / max(0.000001, energy))
+
+        guard confidence > directionConfidenceThreshold, level > 0.04 else {
+            return lastDirectionPoint
         }
-        return sqrt(sum / Float(frames))
+
+        let azimuth = atan2(sumYW, sumXW)
+        let horizontal = (azimuth / .pi + 1) * 0.5
+
+        let elevation = atan2(sumZW, sqrt(sumXW * sumXW + sumYW * sumYW))
+        let vertical = 0.5 - (elevation / (.pi / 2)) * 0.35
+
+        let clamped = CGPoint(x: CGFloat(horizontal).clamped(to: 0.1...0.9),
+                              y: CGFloat(vertical).clamped(to: 0.1...0.9))
+        lastDirectionPoint = clamped
+        return clamped
+    }
+
+    private func enqueuePlayback(_ buffer: AVAudioPCMBuffer) {
+        guard let playerNode = playerNode else { return }
+        if pendingBuffers >= maxPendingBuffers {
+            return
+        }
+
+        pendingBuffers += 1
+        playerNode.scheduleBuffer(buffer) { [weak self] in
+            self?.captureQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.pendingBuffers = max(0, self.pendingBuffers - 1)
+            }
+        }
+    }
+}
+
+extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
+    func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return
+        }
+
+        let channelCount = Int(asbd.pointee.mChannelsPerFrame)
+        guard channelCount >= 4 else { return }
+
+        let frames = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard frames > 0 else { return }
+
+        let isFloat = (asbd.pointee.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let isNonInterleaved = (asbd.pointee.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let bufferCount = isNonInterleaved ? channelCount : 1
+        let bufferListSize = AuroraAudioProcessor.audioBufferListSize(maximumBuffers: bufferCount)
+        let rawPointer = UnsafeMutableRawPointer.allocate(byteCount: bufferListSize,
+                                                          alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { rawPointer.deallocate() }
+
+        let audioBufferList = rawPointer.bindMemory(to: AudioBufferList.self, capacity: 1)
+        audioBufferList.pointee.mNumberBuffers = UInt32(bufferCount)
+
+        var blockBuffer: CMBlockBuffer?
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer,
+            bufferListSizeNeededOut: nil,
+            bufferListOut: audioBufferList,
+            bufferListSize: bufferListSize,
+            blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+            blockBufferOut: &blockBuffer
+        )
+
+        guard status == noErr else { return }
+
+        let bufferList = UnsafeMutableAudioBufferListPointer(audioBufferList)
+        let sampleRate = asbd.pointee.mSampleRate
+
+        if isFloat {
+            if isNonInterleaved {
+                guard bufferList.count >= 4,
+                      let w = bufferList[0].mData?.assumingMemoryBound(to: Float.self),
+                      let y = bufferList[1].mData?.assumingMemoryBound(to: Float.self),
+                      let z = bufferList[2].mData?.assumingMemoryBound(to: Float.self),
+                      let x = bufferList[3].mData?.assumingMemoryBound(to: Float.self) else {
+                    return
+                }
+
+                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                    switch channel {
+                    case 0: return w[index]
+                    case 1: return y[index]
+                    case 2: return z[index]
+                    default: return x[index]
+                    }
+                }
+            } else {
+                guard bufferList.count == 1,
+                      let data = bufferList[0].mData?.assumingMemoryBound(to: Float.self) else {
+                    return
+                }
+
+                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                    data[index * channelCount + channel]
+                }
+            }
+        } else if asbd.pointee.mBitsPerChannel == 16 {
+            if isNonInterleaved {
+                guard bufferList.count >= 4,
+                      let w = bufferList[0].mData?.assumingMemoryBound(to: Int16.self),
+                      let y = bufferList[1].mData?.assumingMemoryBound(to: Int16.self),
+                      let z = bufferList[2].mData?.assumingMemoryBound(to: Int16.self),
+                      let x = bufferList[3].mData?.assumingMemoryBound(to: Int16.self) else {
+                    return
+                }
+
+                let scale = 1.0 / Float(Int16.max)
+                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                    switch channel {
+                    case 0: return Float(w[index]) * scale
+                    case 1: return Float(y[index]) * scale
+                    case 2: return Float(z[index]) * scale
+                    default: return Float(x[index]) * scale
+                    }
+                }
+            } else {
+                guard bufferList.count == 1,
+                      let data = bufferList[0].mData?.assumingMemoryBound(to: Int16.self) else {
+                    return
+                }
+
+                let scale = 1.0 / Float(Int16.max)
+                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                    Float(data[index * channelCount + channel]) * scale
+                }
+            }
+        }
+    }
+
+    private static func audioBufferListSize(maximumBuffers: Int) -> Int {
+        MemoryLayout<AudioBufferList>.size + (maximumBuffers - 1) * MemoryLayout<AudioBuffer>.size
     }
 }
 
