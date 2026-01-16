@@ -133,11 +133,14 @@ struct VoiceAuroraView: View {
             let radius = waveBaseSpeed * age + wave.amplitude * 60
             let intensity = (1 - progress).clamped(to: 0...1) * (0.25 + wave.amplitude * 0.75)
 
-            let hue = (0.6 - wave.pitch * 0.35).clamped(to: 0...1)
-            let baseColor = Color(hue: hue, saturation: 0.8, brightness: 0.95)
-            let accentColor = Color(hue: (hue + 0.08).truncatingRemainder(dividingBy: 1),
-                                    saturation: 0.7,
-                                    brightness: 1.0)
+            let hueBase = (0.6 - wave.pitch * 0.35).clamped(to: 0...1)
+            let hueDrift = sin(age * 1.4 + wave.phase) * 0.08
+            let hue1 = (hueBase + hueDrift).truncatingRemainder(dividingBy: 1)
+            let hue2 = (hue1 + 0.12).truncatingRemainder(dividingBy: 1)
+            let hue3 = (hue1 + 0.24).truncatingRemainder(dividingBy: 1)
+            let baseColor = Color(hue: hue1, saturation: 0.82, brightness: 0.96)
+            let midColor = Color(hue: hue2, saturation: 0.7, brightness: 0.98)
+            let accentColor = Color(hue: hue3, saturation: 0.6, brightness: 1.0)
 
             let points = wavePoints(for: wave, size: size, time: time, radius: radius)
             guard points.count > 2 else { continue }
@@ -156,13 +159,17 @@ struct VoiceAuroraView: View {
                                with: .color(baseColor.opacity(intensity * 0.35)),
                                lineWidth: lineWidth + 10)
 
-            context.stroke(path,
-                           with: .color(baseColor.opacity(intensity * 0.65)),
-                           lineWidth: lineWidth + 2)
-
-            context.stroke(path,
-                           with: .color(accentColor.opacity(intensity)),
-                           lineWidth: lineWidth)
+            var colorContext = context
+            colorContext.blendMode = .screen
+            colorContext.stroke(path,
+                                with: .color(baseColor.opacity(intensity * 0.55)),
+                                lineWidth: lineWidth + 2)
+            colorContext.stroke(path,
+                                with: .color(midColor.opacity(intensity * 0.7)),
+                                lineWidth: lineWidth + 0.5)
+            colorContext.stroke(path,
+                                with: .color(accentColor.opacity(intensity)),
+                                lineWidth: lineWidth)
         }
     }
 
