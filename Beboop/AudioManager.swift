@@ -13,8 +13,8 @@ final class AudioManager: ObservableObject {
     @Published var playbackSpeeds: [Int: Float] = [:]
 
     // Speed limits
-    static let minSpeed: Float = 0.5
-    static let maxSpeed: Float = 2.0
+    static let minSpeed: Float = 0.125
+    static let maxSpeed: Float = 8.0
     static let defaultSpeed: Float = 1.0
 
     init() {

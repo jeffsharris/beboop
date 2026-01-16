@@ -34,6 +34,7 @@ struct SoundTileView: View {
     private let flipRevealThreshold: CGFloat = 60
     private let loopStartDelay: TimeInterval = 0.35
     private let recordHoldDelay: TimeInterval = 0.25
+    private let speedOctavePoints: CGFloat = 80
     private let flipAnimation = Animation.easeInOut(duration: 0.4)
 
     var body: some View {
@@ -124,41 +125,45 @@ struct SoundTileView: View {
                         .stroke(Color.white.opacity(0.25), lineWidth: 2)
                 )
 
-            VStack(spacing: minSize * 0.14) {
+            VStack {
                 Spacer()
 
-                if playbackSpeed != 1.0 {
-                    backTileButton(icon: "arrow.counterclockwise", tint: Color.blue, size: minSize) {
-                        onResetSpeed()
+                HStack(spacing: minSize * 0.08) {
+                    if playbackSpeed != 1.0 {
+                        backTileButton(icon: "arrow.counterclockwise", tint: Color.blue, size: minSize) {
+                            onResetSpeed()
+                            flipBack()
+                        }
+                    }
+
+                    backTileButton(icon: "square.and.arrow.up", tint: Color.green, size: minSize) {
+                        onShare()
                         flipBack()
                     }
-                }
 
-                backTileButton(icon: "square.and.arrow.up", tint: Color.green, size: minSize) {
-                    onShare()
-                    flipBack()
-                }
-
-                backTileButton(icon: "trash.fill", tint: Color.red, size: minSize) {
-                    onClear()
-                    flipBack()
+                    backTileButton(icon: "trash.fill", tint: Color.red, size: minSize) {
+                        onClear()
+                        flipBack()
+                    }
                 }
 
                 Spacer()
             }
         }
         .frame(width: size.width, height: size.height)
+        .contentShape(Rectangle())
         .onTapGesture {
             flipBack()
         }
+        .simultaneousGesture(backSwipeGesture)
     }
 
     @ViewBuilder
     private func backTileButton(icon: String, tint: Color, size: CGFloat, action: @escaping () -> Void) -> some View {
-        let buttonSize = size * 0.32
+        let buttonSize = size * 0.24
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: size * 0.18, weight: .semibold))
+                .font(.system(size: buttonSize * 0.5, weight: .semibold))
                 .foregroundColor(.white)
                 .frame(width: buttonSize, height: buttonSize)
                 .background(tint.opacity(0.85))
@@ -172,44 +177,33 @@ struct SoundTileView: View {
 
     @ViewBuilder
     private func speedIndicator(size: CGFloat) -> some View {
-        VStack(spacing: 4) {
+        HStack(spacing: 4) {
             if isAdjustingSpeed {
                 Image(systemName: dragOffset.height < 0 ? "chevron.up" : "chevron.down")
-                    .font(.system(size: size * 0.12, weight: .bold))
-                    .foregroundColor(.white)
-                    .opacity(abs(dragOffset.height) > gestureThreshold ? 1.0 : 0.5)
+                    .font(.system(size: size * 0.06, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.6))
             }
 
             Text(speedText)
-                .font(.system(size: size * 0.14, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(speedBackgroundColor.opacity(0.9))
-                .clipShape(Capsule())
+                .font(.system(size: size * 0.08, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.75))
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.white.opacity(0.15))
+        .clipShape(Capsule())
         .animation(.easeOut(duration: 0.15), value: playbackSpeed)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, size * 0.08)
+        .padding(.top, size * 0.06)
     }
 
     private var speedText: String {
         if playbackSpeed == 1.0 {
             return "1x"
         } else if playbackSpeed < 1.0 {
-            return String(format: "%.1fx", playbackSpeed)
+            return String(format: "%.2fx", playbackSpeed)
         } else {
             return String(format: "%.1fx", playbackSpeed)
-        }
-    }
-
-    private var speedBackgroundColor: Color {
-        if playbackSpeed > 1.0 {
-            return .orange
-        } else if playbackSpeed < 1.0 {
-            return .purple
-        } else {
-            return .gray
         }
     }
 
@@ -272,8 +266,9 @@ struct SoundTileView: View {
             }
             dragOffset = translation
 
-            let speedDelta = Float(-translation.height / 150)
-            let newSpeed = speedDragStart + speedDelta
+            let exponent = -translation.height / speedOctavePoints
+            let speedScale = Float(pow(2.0, Double(exponent)))
+            let newSpeed = speedDragStart * speedScale
             onSpeedChange(newSpeed)
 
         } else if absX > absY && absX > gestureThreshold {
@@ -341,6 +336,19 @@ struct SoundTileView: View {
                 playInteractionSound(.release)
             }
         }
+    }
+
+    private var backSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: gestureThreshold, coordinateSpace: .local)
+            .onEnded { value in
+                let translation = value.translation
+                let absX = abs(translation.width)
+                let absY = abs(translation.height)
+
+                if absX > absY && absX > flipRevealThreshold {
+                    flipBack()
+                }
+            }
     }
 
     private func flipTileState() {
