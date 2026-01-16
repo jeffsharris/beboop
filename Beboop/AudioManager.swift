@@ -16,6 +16,8 @@ final class AudioManager: NSObject, ObservableObject {
     private var buffers: [Int: AVAudioPCMBuffer] = [:]
     private var loopingTiles: Set<Int> = []
     private var activeTaps: Set<Int> = []
+    private var fallbackPlayers: [Int: AVAudioPlayer] = [:]
+    private var fallbackMeterTimers: [Int: Timer] = [:]
     private let fileManager = FileManager.default
     private var recordingStartDate: Date?
     private let minimumRecordingDuration: TimeInterval = 0.5
@@ -145,6 +147,10 @@ final class AudioManager: NSObject, ObservableObject {
 
         chain.player.stop()
         ensureEngineRunning()
+        guard engine.isRunning, chain.player.engine === engine else {
+            playFallback(tileIndex: tileIndex, loop: false)
+            return
+        }
         chain.player.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
             DispatchQueue.main.async {
                 self?.stopPlayback(for: tileIndex)
@@ -162,7 +168,6 @@ final class AudioManager: NSObject, ObservableObject {
 
     func startLooping(tileIndex: Int) {
         stopPlayback(for: tileIndex)
-        loopingTiles.insert(tileIndex)
 
         guard let buffer = buffer(for: tileIndex) else {
             return
@@ -174,14 +179,28 @@ final class AudioManager: NSObject, ObservableObject {
         let chain = playbackChain(for: tileIndex, format: buffer.format)
         updateTimePitch(for: tileIndex, chain: chain)
 
+        ensureEngineRunning()
+        guard engine.isRunning, chain.player.engine === engine else {
+            playFallback(tileIndex: tileIndex, loop: true)
+            return
+        }
+        loopingTiles.insert(tileIndex)
         scheduleLoop(for: tileIndex, buffer: buffer, chain: chain)
     }
 
     func stopLoopingAfterCurrent(tileIndex: Int) {
+        if let fallback = fallbackPlayers[tileIndex], fallback.numberOfLoops == -1 {
+            fallback.numberOfLoops = 0
+        }
         loopingTiles.remove(tileIndex)
     }
 
     private func scheduleLoop(for tileIndex: Int, buffer: AVAudioPCMBuffer, chain: PlaybackChain) {
+        ensureEngineRunning()
+        guard engine.isRunning, chain.player.engine === engine else {
+            playFallback(tileIndex: tileIndex, loop: true)
+            return
+        }
         chain.player.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -207,6 +226,11 @@ final class AudioManager: NSObject, ObservableObject {
             chain.player.stop()
             stopMetering(for: tileIndex, on: chain.mixer)
         }
+        if let fallback = fallbackPlayers[tileIndex] {
+            fallback.stop()
+            fallbackPlayers[tileIndex] = nil
+            stopFallbackMetering(for: tileIndex)
+        }
     }
 
     func hasRecording(for tileIndex: Int) -> Bool {
@@ -229,6 +253,9 @@ final class AudioManager: NSObject, ObservableObject {
         if let chain = playbackChains[tileIndex] {
             updateTimePitch(for: tileIndex, chain: chain)
         }
+        if let fallback = fallbackPlayers[tileIndex], fallback.isPlaying {
+            fallback.rate = normalizedSpeed
+        }
     }
 
     func resetPlaybackSpeed(for tileIndex: Int) {
@@ -236,6 +263,9 @@ final class AudioManager: NSObject, ObservableObject {
 
         if let chain = playbackChains[tileIndex] {
             updateTimePitch(for: tileIndex, chain: chain)
+        }
+        if let fallback = fallbackPlayers[tileIndex], fallback.isPlaying {
+            fallback.rate = Self.defaultSpeed
         }
 
         let generator = UINotificationFeedbackGenerator()
@@ -416,5 +446,62 @@ final class AudioManager: NSObject, ObservableObject {
         let rms = sqrt(sum / Float(frames))
         let normalized = min(1.0, max(0.0, rms * 6.0))
         return normalized
+    }
+
+    // MARK: - Fallback Playback
+
+    private func playFallback(tileIndex: Int, loop: Bool) {
+        stopFallbackMetering(for: tileIndex)
+
+        let url = audioFileURL(for: tileIndex)
+        guard fileManager.fileExists(atPath: url.path) else {
+            return
+        }
+
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.enableRate = true
+            player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
+            player.numberOfLoops = loop ? -1 : 0
+            player.isMeteringEnabled = true
+            player.prepareToPlay()
+            player.play()
+
+            fallbackPlayers[tileIndex] = player
+            startFallbackMetering(for: tileIndex, player: player)
+        } catch {
+            print("Fallback playback failed: \(error)")
+        }
+    }
+
+    private func startFallbackMetering(for tileIndex: Int, player: AVAudioPlayer) {
+        stopFallbackMetering(for: tileIndex)
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self, weak player] _ in
+            guard let self = self, let player = player else {
+                self?.stopFallbackMetering(for: tileIndex)
+                return
+            }
+
+            guard player.isPlaying else {
+                self.stopFallbackMetering(for: tileIndex)
+                self.fallbackPlayers[tileIndex] = nil
+                return
+            }
+
+            player.updateMeters()
+            let power = player.averagePower(forChannel: 0)
+            let linear = pow(10.0, power / 20.0)
+            let normalized = min(1.0, max(0.0, (linear - 0.02) / 0.98))
+            self.playbackLevels[tileIndex] = Float(normalized)
+        }
+
+        fallbackMeterTimers[tileIndex] = timer
+    }
+
+    private func stopFallbackMetering(for tileIndex: Int) {
+        fallbackMeterTimers[tileIndex]?.invalidate()
+        fallbackMeterTimers[tileIndex] = nil
+        playbackLevels[tileIndex] = 0
     }
 }
