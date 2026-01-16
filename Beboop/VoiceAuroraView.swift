@@ -1,9 +1,24 @@
 import SwiftUI
 import AVFoundation
-import Accelerate
 
 struct VoiceAuroraView: View {
+    private struct Ripple: Identifiable {
+        let id = UUID()
+        let origin: CGPoint
+        let startTime: Double
+        let amplitude: Double
+        let pitch: Double
+    }
+
     @StateObject private var audioProcessor = AuroraAudioProcessor()
+    @State private var ripples: [Ripple] = []
+    @State private var lastUpdateTime: Date = Date()
+    @State private var lastRippleTime: Date = .distantPast
+
+    private let rippleCooldown: TimeInterval = 0.18
+    private let rippleMinLevel: Double = 0.08
+    private let rippleMaxAge: Double = 2.8
+    private let rippleBaseSpeed: Double = 140
 
     var body: some View {
         GeometryReader { geometry in
@@ -13,9 +28,11 @@ struct VoiceAuroraView: View {
                     let level = Double(audioProcessor.smoothedLevel)
                     let pitch = Double(audioProcessor.dominantPitch)
 
-                    drawBackground(context: &context, size: size, time: currentTime, level: level)
-                    drawAurora(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
-                    drawSparkles(context: &context, size: size, time: currentTime, level: level)
+                    drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
+                    drawRipples(context: &context, size: size, time: currentTime)
+                }
+                .onChange(of: timeline.date) { _, newDate in
+                    updateRipples(at: newDate)
                 }
             }
             .ignoresSafeArea()
@@ -28,15 +45,38 @@ struct VoiceAuroraView: View {
         }
     }
 
-    // MARK: - Background
+    private func updateRipples(at date: Date) {
+        let currentTime = date.timeIntervalSinceReferenceDate
+        let level = Double(audioProcessor.smoothedLevel)
+        let pitch = Double(audioProcessor.dominantPitch)
+        let source = audioProcessor.sourcePoint
 
-    private func drawBackground(context: inout GraphicsContext, size: CGSize, time: Double, level: Double) {
-        let baseBrightness = 0.02 + level * 0.03
-        let topHue = 0.7 + sin(time * 0.1) * 0.05
-        let bottomHue = 0.85 + cos(time * 0.08) * 0.05
+        if level > rippleMinLevel, date.timeIntervalSince(lastRippleTime) > rippleCooldown {
+            let amplitude = ((level - rippleMinLevel) / max(0.001, 1 - rippleMinLevel)).clamped(to: 0...1)
+            let ripple = Ripple(origin: source, startTime: currentTime, amplitude: amplitude, pitch: pitch)
+            ripples.append(ripple)
+            lastRippleTime = date
+        }
 
-        let topColor = Color(hue: topHue, saturation: 0.8, brightness: baseBrightness)
-        let bottomColor = Color(hue: bottomHue, saturation: 0.7, brightness: baseBrightness * 0.5)
+        ripples.removeAll { currentTime - $0.startTime > rippleMaxAge }
+        lastUpdateTime = date
+    }
+
+    private func drawWaterBackground(context: inout GraphicsContext,
+                                     size: CGSize,
+                                     time: Double,
+                                     level: Double,
+                                     pitch: Double) {
+        let shimmer = 0.02 * sin(time * 0.7)
+        let depth = 0.18 + level * 0.08
+        let hueShift = 0.55 - pitch * 0.2
+
+        let topColor = Color(hue: hueShift + 0.02 + shimmer,
+                             saturation: 0.6,
+                             brightness: depth + 0.05)
+        let bottomColor = Color(hue: hueShift + 0.05,
+                                saturation: 0.7,
+                                brightness: depth * 0.6)
 
         let gradient = Gradient(colors: [topColor, bottomColor])
         let rect = CGRect(origin: .zero, size: size)
@@ -46,177 +86,38 @@ struct VoiceAuroraView: View {
         )
     }
 
-    // MARK: - Aurora Ribbons
+    private func drawRipples(context: inout GraphicsContext, size: CGSize, time: Double) {
+        for ripple in ripples {
+            let age = time - ripple.startTime
+            guard age >= 0 else { continue }
 
-    private func drawAurora(context: inout GraphicsContext, size: CGSize, time: Double, level: Double, pitch: Double) {
-        for layer in 0..<5 {
-            let layerOffset = Double(layer) * 0.2
-            let layerIntensity = 1.0 - Double(layer) * 0.15
-            let intensity = level * layerIntensity
+            let progress = age / rippleMaxAge
+            let radius = rippleBaseSpeed * age + ripple.amplitude * 40
+            let intensity = (1 - progress).clamped(to: 0...1) * (0.25 + ripple.amplitude * 0.75)
 
-            drawAuroraRibbon(
-                context: &context,
-                size: size,
-                time: time,
-                layer: layer,
-                layerOffset: layerOffset,
-                intensity: intensity,
-                pitch: pitch
+            let hue = (0.58 - ripple.pitch * 0.35).clamped(to: 0...1)
+            let color = Color(hue: hue, saturation: 0.7, brightness: 0.95)
+
+            let origin = CGPoint(x: ripple.origin.x * size.width,
+                                 y: ripple.origin.y * size.height)
+            let rect = CGRect(
+                x: origin.x - radius,
+                y: origin.y - radius,
+                width: radius * 2,
+                height: radius * 2
             )
+
+            let lineWidth = 1.5 + ripple.amplitude * 4
+            var rippleContext = context
+            rippleContext.addFilter(.blur(radius: 3))
+            rippleContext.stroke(Path(ellipseIn: rect),
+                                 with: .color(color.opacity(intensity * 0.35)),
+                                 lineWidth: lineWidth + 4)
+
+            context.stroke(Path(ellipseIn: rect),
+                           with: .color(color.opacity(intensity)),
+                           lineWidth: lineWidth)
         }
-    }
-
-    private func drawAuroraRibbon(
-        context: inout GraphicsContext,
-        size: CGSize,
-        time: Double,
-        layer: Int,
-        layerOffset: Double,
-        intensity: Double,
-        pitch: Double
-    ) {
-        let ribbonPath = createRibbonPath(size: size, time: time, layer: layer, layerOffset: layerOffset, intensity: intensity)
-        let ribbonColor = calculateRibbonColor(time: time, layer: layer, pitch: pitch, intensity: intensity)
-
-        let gradient = Gradient(stops: [
-            .init(color: ribbonColor.opacity(0.6 + intensity * 0.3), location: 0),
-            .init(color: ribbonColor.opacity(0.3 + intensity * 0.2), location: 0.3),
-            .init(color: ribbonColor.opacity(0), location: 1)
-        ])
-
-        let gradientStart = CGPoint(x: size.width / 2, y: 0)
-        let gradientEnd = CGPoint(x: size.width / 2, y: size.height)
-
-        // Blurred glow layer
-        var blurredContext = context
-        let blurRadius = 20 + intensity * 30
-        blurredContext.addFilter(.blur(radius: blurRadius))
-        blurredContext.fill(ribbonPath, with: .linearGradient(gradient, startPoint: gradientStart, endPoint: gradientEnd))
-
-        // Sharp overlay for definition
-        context.fill(ribbonPath, with: .linearGradient(gradient, startPoint: gradientStart, endPoint: gradientEnd))
-    }
-
-    private func createRibbonPath(size: CGSize, time: Double, layer: Int, layerOffset: Double, intensity: Double) -> Path {
-        let segments = 60
-        let baseY = size.height * (0.3 + layerOffset * 0.4)
-        let layerSpeed = 0.5 + Double(layer) * 0.1
-        let points = ribbonPoints(
-            segments: segments,
-            width: size.width,
-            baseY: baseY,
-            time: time,
-            layerSpeed: layerSpeed,
-            layerOffset: layerOffset,
-            intensity: intensity
-        )
-
-        return Path { path in
-            for (index, point) in points.enumerated() {
-                if index == 0 {
-                    path.move(to: point)
-                } else {
-                    path.addLine(to: point)
-                }
-            }
-
-            path.addLine(to: CGPoint(x: size.width, y: size.height + 50))
-            path.addLine(to: CGPoint(x: 0, y: size.height + 50))
-            path.closeSubpath()
-        }
-    }
-
-    private func ribbonPoints(
-        segments: Int,
-        width: CGFloat,
-        baseY: CGFloat,
-        time: Double,
-        layerSpeed: Double,
-        layerOffset: Double,
-        intensity: Double
-    ) -> [CGPoint] {
-        var points: [CGPoint] = []
-        points.reserveCapacity(segments + 1)
-
-        for index in 0...segments {
-            let progress = Double(index) / Double(segments)
-            let x = width * CGFloat(index) / CGFloat(segments)
-
-            let wave1 = sin(progress * 4 * .pi + time * layerSpeed) * 40
-            let wave2 = sin(progress * 7 * .pi + time * 0.7 + layerOffset) * 25
-            let wave3 = sin(progress * 2 * .pi + time * 0.3) * 60
-            let audioWave = sin(progress * 10 * .pi + time * 2) * intensity * 80
-
-            let y = baseY + wave1 + wave2 + wave3 + audioWave
-            points.append(CGPoint(x: x, y: y))
-        }
-
-        return points
-    }
-
-    private func calculateRibbonColor(time: Double, layer: Int, pitch: Double, intensity: Double) -> Color {
-        // Low pitch = warm colors (red/orange), high pitch = cool colors (cyan/blue)
-        let pitchHue = 0.5 - pitch * 0.4
-        let layerHueOffset = Double(layer) * 0.08
-        let timeHueOffset = sin(time * 0.2) * 0.05
-        let baseHue = pitchHue + layerHueOffset + timeHueOffset
-
-        var normalizedHue = baseHue.truncatingRemainder(dividingBy: 1.0)
-        if normalizedHue < 0 { normalizedHue += 1 }
-
-        let saturation = 0.6 + intensity * 0.4
-        let brightness = 0.3 + intensity * 0.5
-
-        return Color(hue: normalizedHue, saturation: saturation, brightness: brightness)
-    }
-
-    // MARK: - Sparkles
-
-    private func drawSparkles(context: inout GraphicsContext, size: CGSize, time: Double, level: Double) {
-        guard level > 0.1 else { return }
-
-        let sparkleCount = Int(level * 30) + 5
-
-        for i in 0..<sparkleCount {
-            drawSingleSparkle(context: &context, size: size, time: time, level: level, index: i)
-        }
-    }
-
-    private func drawSingleSparkle(context: inout GraphicsContext, size: CGSize, time: Double, level: Double, index: Int) {
-        let seed = Double(index) * 1234.5678
-        let x = (sin(seed) * 0.5 + 0.5) * size.width
-        let baseY = (cos(seed * 1.1) * 0.5 + 0.5) * size.height * 0.7
-
-        let drift = (time * 20 + seed).truncatingRemainder(dividingBy: size.height)
-        let y = baseY - drift
-
-        guard y > 0 else { return }
-
-        let twinkle = (sin(time * 5 + seed) + 1) / 2
-        let sparkleSize = (2 + level * 4) * twinkle
-
-        // Glow
-        let sparkleColor = Color.white.opacity(0.3 + twinkle * 0.5 * level)
-        let sparkleRect = CGRect(
-            x: x - sparkleSize / 2,
-            y: y - sparkleSize / 2,
-            width: sparkleSize,
-            height: sparkleSize
-        )
-
-        var sparkleContext = context
-        sparkleContext.addFilter(.blur(radius: 2))
-        sparkleContext.fill(Path(ellipseIn: sparkleRect), with: .color(sparkleColor))
-
-        // Bright center
-        let centerSize = sparkleSize / 2
-        let centerRect = CGRect(
-            x: x - centerSize / 2,
-            y: y - centerSize / 2,
-            width: centerSize,
-            height: centerSize
-        )
-        context.fill(Path(ellipseIn: centerRect), with: .color(.white.opacity(twinkle * level)))
     }
 }
 
@@ -226,11 +127,20 @@ struct VoiceAuroraView: View {
 final class AuroraAudioProcessor: ObservableObject {
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
+    @Published var sourcePoint: CGPoint = CGPoint(x: 0.5, y: 0.9)
 
     private var audioEngine: AVAudioEngine?
+    private var gateMixer: AVAudioMixerNode?
+    private var delayNode: AVAudioUnitDelay?
     private var isListening = false
     private var levelHistory: [Float] = []
     private let levelHistorySize = 8
+    private var echoMix: Float = 0
+    private var isBuiltInMic = true
+
+    private let echoGateThreshold: Float = 0.09
+    private let echoGateRelease: Float = 0.9
+    private let sourceSmoothing: CGFloat = 0.15
 
     func startListening() {
         guard !isListening else { return }
@@ -249,17 +159,36 @@ final class AuroraAudioProcessor: ObservableObject {
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
+        gateMixer = nil
+        delayNode = nil
     }
 
     private func setupAudioEngine() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers])
+            try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
             try session.setActive(true)
+
+            isBuiltInMic = session.currentRoute.inputs.contains { $0.portType == .builtInMic }
 
             let engine = AVAudioEngine()
             let inputNode = engine.inputNode
             let format = inputNode.outputFormat(forBus: 0)
+
+            let gateMixer = AVAudioMixerNode()
+            gateMixer.outputVolume = 0
+
+            let delay = AVAudioUnitDelay()
+            delay.delayTime = 0.24
+            delay.feedback = 36
+            delay.lowPassCutoff = 9000
+            delay.wetDryMix = 35
+
+            engine.attach(gateMixer)
+            engine.attach(delay)
+            engine.connect(inputNode, to: gateMixer, format: format)
+            engine.connect(gateMixer, to: delay, format: format)
+            engine.connect(delay, to: engine.mainMixerNode, format: format)
 
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
                 self?.processAudioBuffer(buffer)
@@ -269,6 +198,8 @@ final class AuroraAudioProcessor: ObservableObject {
             try engine.start()
 
             self.audioEngine = engine
+            self.gateMixer = gateMixer
+            self.delayNode = delay
             self.isListening = true
         } catch {
             print("Aurora audio setup failed: \(error)")
@@ -281,21 +212,24 @@ final class AuroraAudioProcessor: ObservableObject {
         let frames = Int(buffer.frameLength)
         guard frames > 0 else { return }
 
-        let data = channelData.pointee
+        let channelCount = Int(buffer.format.channelCount)
+        let rmsLeft = rmsLevel(channelData[0], frames: frames)
+        var rms = rmsLeft
+        var targetPoint = CGPoint(x: 0.5, y: 0.9)
 
-        // Calculate RMS level
-        var sum: Float = 0
-        for i in 0..<frames {
-            let value = data[i]
-            sum += value * value
+        if channelCount > 1, isBuiltInMic {
+            let rmsRight = rmsLevel(channelData[1], frames: frames)
+            rms = (rmsLeft + rmsRight) * 0.5
+            let balance = (rmsLeft - rmsRight) / max(0.0001, rmsLeft + rmsRight)
+            let x = (0.5 + CGFloat(balance) * 0.35).clamped(to: 0.1...0.9)
+            targetPoint = CGPoint(x: x, y: 0.85)
         }
-        let rms = sqrt(sum / Float(frames))
 
         let normalizedLevel = min(1.0, rms * 8.0)
         let curvedLevel = pow(normalizedLevel, 0.7)
 
-        // Estimate pitch using zero-crossing rate
         var zeroCrossings = 0
+        let data = channelData[0]
         for i in 1..<frames {
             let current = data[i]
             let previous = data[i - 1]
@@ -309,6 +243,9 @@ final class AuroraAudioProcessor: ObservableObject {
         let logFreq = log2(estimatedFreq / 100.0) / 3.3
         let normalizedPitch = Float(min(1.0, max(0.0, logFreq)))
 
+        let targetEcho: Float = normalizedLevel > echoGateThreshold ? 1.0 : 0.0
+        echoMix = echoMix * echoGateRelease + targetEcho * (1 - echoGateRelease)
+
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
@@ -318,7 +255,35 @@ final class AuroraAudioProcessor: ObservableObject {
             }
             self.smoothedLevel = self.levelHistory.reduce(0, +) / Float(self.levelHistory.count)
             self.dominantPitch = self.dominantPitch * 0.85 + normalizedPitch * 0.15
+
+            let nextX = self.sourcePoint.x * (1 - self.sourceSmoothing) + targetPoint.x * self.sourceSmoothing
+            let nextY = self.sourcePoint.y * (1 - self.sourceSmoothing) + targetPoint.y * self.sourceSmoothing
+            self.sourcePoint = CGPoint(x: nextX, y: nextY)
+
+            self.gateMixer?.outputVolume = self.echoMix
+            self.delayNode?.wetDryMix = 28 + 32 * self.echoMix
         }
+    }
+
+    private func rmsLevel(_ data: UnsafePointer<Float>, frames: Int) -> Float {
+        var sum: Float = 0
+        for i in 0..<frames {
+            let value = data[i]
+            sum += value * value
+        }
+        return sqrt(sum / Float(frames))
+    }
+}
+
+private extension Double {
+    func clamped(to range: ClosedRange<Double>) -> Double {
+        min(range.upperBound, max(range.lowerBound, self))
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        Swift.min(range.upperBound, Swift.max(range.lowerBound, self))
     }
 }
 
