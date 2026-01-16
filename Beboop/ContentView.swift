@@ -41,6 +41,7 @@ struct ContentView: View {
                                 hasRecording: audioManager.hasRecording(for: index),
                                 isRecording: audioManager.currentRecordingTile == index,
                                 playbackSpeed: audioManager.getPlaybackSpeed(for: index),
+                                playbackLevel: audioManager.playbackLevels[index] ?? 0,
                                 activeBackIndex: $activeBackIndex,
                                 onStartRecording: {
                                     audioManager.startRecording(for: index)

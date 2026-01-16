@@ -1,21 +1,24 @@
 import AVFoundation
 import UIKit
 
-final class AudioManager: ObservableObject {
+final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
     private var recorder: AVAudioRecorder?
     private var players: [Int: AVAudioPlayer] = [:]
     private let fileManager = FileManager.default
     private var recordingStartDate: Date?
     private let minimumRecordingDuration: TimeInterval = 0.5
+    private var meterTimers: [Int: Timer] = [:]
 
     @Published var isRecording = false
     @Published var currentRecordingTile: Int?
     @Published var playbackSpeeds: [Int: Float] = [:]
+    @Published var playbackLevels: [Int: Float] = [:]
 
     // Speed limits
-    static let minSpeed: Float = 0.125
-    static let maxSpeed: Float = 8.0
+    static let minSpeed: Float = 0.1
+    static let maxSpeed: Float = 10.0
     static let defaultSpeed: Float = 1.0
+    static let speedStep: Float = 0.05
 
     init() {
         setupAudioSession()
@@ -114,10 +117,12 @@ final class AudioManager: ObservableObject {
             let player = try AVAudioPlayer(contentsOf: url)
             player.enableRate = true
             player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
+            player.delegate = self
             player.prepareToPlay()
             player.play()
 
             players[tileIndex] = player
+            startMetering(for: tileIndex, player: player)
 
             let generator = UIImpactFeedbackGenerator(style: .soft)
             generator.impactOccurred()
@@ -140,10 +145,12 @@ final class AudioManager: ObservableObject {
             player.enableRate = true
             player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
             player.numberOfLoops = -1
+            player.delegate = self
             player.prepareToPlay()
             player.play()
 
             players[tileIndex] = player
+            startMetering(for: tileIndex, player: player)
         } catch {
             print("Looped playback failed: \(error)")
         }
@@ -159,6 +166,7 @@ final class AudioManager: ObservableObject {
     private func stopPlayback(for tileIndex: Int) {
         players[tileIndex]?.stop()
         players[tileIndex] = nil
+        stopMetering(for: tileIndex)
     }
 
     func hasRecording(for tileIndex: Int) -> Bool {
@@ -174,10 +182,12 @@ final class AudioManager: ObservableObject {
 
     func setPlaybackSpeed(for tileIndex: Int, speed: Float) {
         let clampedSpeed = min(max(speed, Self.minSpeed), Self.maxSpeed)
-        playbackSpeeds[tileIndex] = clampedSpeed
+        let steppedSpeed = (clampedSpeed / Self.speedStep).rounded() * Self.speedStep
+        let normalizedSpeed = min(max(steppedSpeed, Self.minSpeed), Self.maxSpeed)
+        playbackSpeeds[tileIndex] = normalizedSpeed
 
         if let player = players[tileIndex], player.isPlaying {
-            player.rate = clampedSpeed
+            player.rate = normalizedSpeed
         }
     }
 
@@ -194,6 +204,7 @@ final class AudioManager: ObservableObject {
         stopPlayback(for: tileIndex)
 
         playbackSpeeds[tileIndex] = nil
+        playbackLevels[tileIndex] = nil
 
         let url = audioFileURL(for: tileIndex)
 
@@ -219,5 +230,45 @@ final class AudioManager: ObservableObject {
     func getShareableURL(for tileIndex: Int) -> URL? {
         let url = audioFileURL(for: tileIndex)
         return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    // MARK: - Metering
+
+    private func startMetering(for tileIndex: Int, player: AVAudioPlayer) {
+        stopMetering(for: tileIndex)
+        playbackLevels[tileIndex] = 0
+        player.isMeteringEnabled = true
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self, weak player] _ in
+            guard let self = self, let player = player else {
+                self?.stopMetering(for: tileIndex)
+                return
+            }
+
+            guard player.isPlaying else {
+                self.stopMetering(for: tileIndex)
+                return
+            }
+
+            player.updateMeters()
+            let power = player.averagePower(forChannel: 0)
+            let linear = pow(10.0, power / 20.0)
+            let normalized = min(1.0, max(0.0, (linear - 0.02) / 0.98))
+            self.playbackLevels[tileIndex] = Float(normalized)
+        }
+
+        meterTimers[tileIndex] = timer
+    }
+
+    private func stopMetering(for tileIndex: Int) {
+        meterTimers[tileIndex]?.invalidate()
+        meterTimers[tileIndex] = nil
+        playbackLevels[tileIndex] = 0
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        guard let tileIndex = players.first(where: { $0.value === player })?.key else { return }
+        players[tileIndex] = nil
+        stopMetering(for: tileIndex)
     }
 }

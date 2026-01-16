@@ -4,7 +4,7 @@ import SwiftUI
 struct BeboopApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
         }
     }
 }

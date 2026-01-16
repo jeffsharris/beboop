@@ -7,6 +7,7 @@ struct SoundTileView: View {
     let hasRecording: Bool
     let isRecording: Bool
     let playbackSpeed: Float
+    let playbackLevel: Float
     @Binding var activeBackIndex: Int?
     let onStartRecording: () -> Void
     let onStopRecording: () -> Void
@@ -36,6 +37,12 @@ struct SoundTileView: View {
     private let recordHoldDelay: TimeInterval = 0.25
     private let speedOctavePoints: CGFloat = 80
     private let flipAnimation = Animation.easeInOut(duration: 0.4)
+    private static let speedFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        return formatter
+    }()
 
     var body: some View {
         GeometryReader { geometry in
@@ -66,6 +73,13 @@ struct SoundTileView: View {
                         .stroke(color.opacity(0.3), lineWidth: hasRecording ? 0 : 2)
                 )
                 .shadow(color: color.opacity(0.4), radius: isPressed ? 4 : 8, x: 0, y: isPressed ? 2 : 4)
+
+            if playbackLevel > 0 {
+                Rectangle()
+                    .fill(color)
+                    .opacity(0.15 + Double(playbackLevel) * 0.35)
+                    .animation(.easeOut(duration: 0.1), value: playbackLevel)
+            }
 
             if isRecording {
                 Rectangle()
@@ -200,11 +214,11 @@ struct SoundTileView: View {
     private var speedText: String {
         if playbackSpeed == 1.0 {
             return "1x"
-        } else if playbackSpeed < 1.0 {
-            return String(format: "%.2fx", playbackSpeed)
-        } else {
-            return String(format: "%.1fx", playbackSpeed)
         }
+
+        let formatted = Self.speedFormatter.string(from: NSNumber(value: playbackSpeed))
+            ?? String(format: "%.2f", playbackSpeed)
+        return "\(formatted)x"
     }
 
     // MARK: - Gesture
