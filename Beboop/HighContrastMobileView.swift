@@ -177,9 +177,9 @@ struct HighContrastMobileView: View {
                     newVelocity.y *= scale
                 }
 
-                let speed = sqrt(newVelocity.x * newVelocity.x + newVelocity.y * newVelocity.y)
-                if speed < baselineSpeed {
-                    let scale = baselineSpeed / max(speed, 0.01)
+                let adjustedSpeed = sqrt(newVelocity.x * newVelocity.x + newVelocity.y * newVelocity.y)
+                if adjustedSpeed < baselineSpeed {
+                    let scale = baselineSpeed / max(adjustedSpeed, 0.01)
                     newVelocity.x *= scale
                     newVelocity.y *= scale
                 }
