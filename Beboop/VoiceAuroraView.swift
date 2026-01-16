@@ -131,52 +131,82 @@ struct VoiceAuroraView: View {
 
             let progress = age / waveMaxAge
             let radius = waveBaseSpeed * age + wave.amplitude * 60
-            let intensity = (1 - progress).clamped(to: 0...1) * (0.25 + wave.amplitude * 0.75)
+            let intensity = (1 - progress).clamped(to: 0...1)
+            let waveAlpha = intensity * (0.35 + wave.amplitude * 0.65)
+            let bandThickness = 34.0 + wave.amplitude * 70
 
             let hueBase = (0.6 - wave.pitch * 0.35).clamped(to: 0...1)
             let hueDrift = sin(age * 1.4 + wave.phase) * 0.08
             let hue1 = (hueBase + hueDrift).truncatingRemainder(dividingBy: 1)
             let hue2 = (hue1 + 0.12).truncatingRemainder(dividingBy: 1)
             let hue3 = (hue1 + 0.24).truncatingRemainder(dividingBy: 1)
-            let baseColor = Color(hue: hue1, saturation: 0.82, brightness: 0.96)
-            let midColor = Color(hue: hue2, saturation: 0.7, brightness: 0.98)
-            let accentColor = Color(hue: hue3, saturation: 0.6, brightness: 1.0)
+            let hue4 = (hue1 + 0.36).truncatingRemainder(dividingBy: 1)
+            let baseColor = Color(hue: hue1, saturation: 0.84, brightness: 0.96)
+            let midColor = Color(hue: hue2, saturation: 0.78, brightness: 0.98)
+            let accentColor = Color(hue: hue3, saturation: 0.7, brightness: 1.0)
+            let highlightColor = Color(hue: hue4, saturation: 0.62, brightness: 1.0)
 
-            let points = wavePoints(for: wave, size: size, time: time, radius: radius)
-            guard points.count > 2 else { continue }
-
-            let lineWidth = 2.0 + wave.amplitude * 4
-
-            var path = Path()
-            path.move(to: points[0])
-            for point in points.dropFirst() {
-                path.addLine(to: point)
-            }
+            let path = waveBandPath(for: wave,
+                                    size: size,
+                                    time: time,
+                                    radius: radius,
+                                    thickness: bandThickness)
+            guard !path.isEmpty else { continue }
 
             var glowContext = context
-            glowContext.addFilter(.blur(radius: 10))
-            glowContext.stroke(path,
-                               with: .color(baseColor.opacity(intensity * 0.35)),
-                               lineWidth: lineWidth + 10)
+            glowContext.addFilter(.blur(radius: 16))
+            glowContext.fill(path,
+                             with: .color(baseColor.opacity(waveAlpha * 0.3)))
+
+            let depth = CGFloat(min(radius + bandThickness + 40, Double(max(size.width, size.height))))
+            let (gradientStart, gradientEnd) = waveGradientPoints(for: wave, size: size, depth: depth)
+            let gradient = Gradient(stops: [
+                .init(color: baseColor.opacity(waveAlpha * 0.95), location: 0),
+                .init(color: midColor.opacity(waveAlpha * 0.75), location: 0.4),
+                .init(color: accentColor.opacity(waveAlpha * 0.55), location: 0.75),
+                .init(color: highlightColor.opacity(waveAlpha * 0.35), location: 0.95),
+                .init(color: .clear, location: 1)
+            ])
 
             var colorContext = context
             colorContext.blendMode = .screen
+            colorContext.fill(path,
+                              with: .linearGradient(gradient,
+                                                    startPoint: gradientStart,
+                                                    endPoint: gradientEnd))
             colorContext.stroke(path,
-                                with: .color(baseColor.opacity(intensity * 0.55)),
-                                lineWidth: lineWidth + 2)
-            colorContext.stroke(path,
-                                with: .color(midColor.opacity(intensity * 0.7)),
-                                lineWidth: lineWidth + 0.5)
-            colorContext.stroke(path,
-                                with: .color(accentColor.opacity(intensity)),
-                                lineWidth: lineWidth)
+                                with: .color(accentColor.opacity(waveAlpha * 0.45)),
+                                lineWidth: 0.9)
         }
     }
 
-    private func wavePoints(for wave: Wave, size: CGSize, time: Double, radius: Double) -> [CGPoint] {
+    private func waveGradientPoints(for wave: Wave,
+                                    size: CGSize,
+                                    depth: CGFloat) -> (CGPoint, CGPoint) {
+        switch wave.edge {
+        case .left:
+            return (CGPoint(x: 0, y: wave.edgePosition * size.height),
+                    CGPoint(x: min(size.width, depth), y: wave.edgePosition * size.height))
+        case .right:
+            return (CGPoint(x: size.width, y: wave.edgePosition * size.height),
+                    CGPoint(x: max(0, size.width - depth), y: wave.edgePosition * size.height))
+        case .top:
+            return (CGPoint(x: wave.edgePosition * size.width, y: 0),
+                    CGPoint(x: wave.edgePosition * size.width, y: min(size.height, depth)))
+        case .bottom:
+            return (CGPoint(x: wave.edgePosition * size.width, y: size.height),
+                    CGPoint(x: wave.edgePosition * size.width, y: max(0, size.height - depth)))
+        }
+    }
+
+    private func waveBandPath(for wave: Wave,
+                              size: CGSize,
+                              time: Double,
+                              radius: Double,
+                              thickness: Double) -> Path {
         let segments = 120
         let chaos = 6.0 + wave.amplitude * 18.0
-        let band = radius + 40
+        let band = radius + thickness + 70
 
         let length: CGFloat
         let center: CGFloat
@@ -189,8 +219,10 @@ struct VoiceAuroraView: View {
             center = wave.edgePosition * size.width
         }
 
-        var points: [CGPoint] = []
-        points.reserveCapacity(segments + 1)
+        var outer: [CGPoint] = []
+        var inner: [CGPoint] = []
+        outer.reserveCapacity(segments + 1)
+        inner.reserveCapacity(segments + 1)
 
         for i in 0...segments {
             let t = Double(i) / Double(segments)
@@ -203,21 +235,41 @@ struct VoiceAuroraView: View {
             let radial = sqrt(base)
             let noise = sin(delta * 0.08 + time * 1.2 + wave.phase) * chaos
                 + sin(delta * 0.18 + time * 0.7 + wave.phase * 0.7) * (chaos * 0.4)
-            let displaced = max(0, radial + noise)
+            let noiseInner = sin(delta * 0.12 + time * 1.05 + wave.phase * 0.6) * (chaos * 0.35)
+            let outerRadius = max(0, radial + noise + thickness * 0.5)
+            let innerRadius = max(0, radial - thickness + noiseInner)
+            let clippedInner = min(innerRadius, max(0, outerRadius - 2))
+
+            guard outerRadius > 0 else { continue }
 
             switch wave.edge {
             case .left:
-                points.append(CGPoint(x: displaced, y: tangent))
+                outer.append(CGPoint(x: outerRadius, y: tangent))
+                inner.append(CGPoint(x: clippedInner, y: tangent))
             case .right:
-                points.append(CGPoint(x: size.width - displaced, y: tangent))
+                outer.append(CGPoint(x: size.width - outerRadius, y: tangent))
+                inner.append(CGPoint(x: size.width - clippedInner, y: tangent))
             case .top:
-                points.append(CGPoint(x: tangent, y: displaced))
+                outer.append(CGPoint(x: tangent, y: outerRadius))
+                inner.append(CGPoint(x: tangent, y: clippedInner))
             case .bottom:
-                points.append(CGPoint(x: tangent, y: size.height - displaced))
+                outer.append(CGPoint(x: tangent, y: size.height - outerRadius))
+                inner.append(CGPoint(x: tangent, y: size.height - clippedInner))
             }
         }
 
-        return points
+        guard outer.count > 2, inner.count > 2 else { return Path() }
+
+        var path = Path()
+        path.move(to: outer[0])
+        for point in outer.dropFirst() {
+            path.addLine(to: point)
+        }
+        for point in inner.reversed() {
+            path.addLine(to: point)
+        }
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -267,6 +319,7 @@ final class AuroraAudioProcessor: ObservableObject {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
+            try session.setMode(.voiceChat)
             try session.setActive(true)
 
             isBuiltInMic = session.currentRoute.inputs.contains { $0.portType == .builtInMic }
