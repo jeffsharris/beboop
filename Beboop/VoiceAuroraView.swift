@@ -284,6 +284,7 @@ final class AuroraAudioProcessor: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var gateMixer: AVAudioMixerNode?
     private var delayNode: AVAudioUnitDelay?
+    private var boostNode: AVAudioUnitEQ?
     private var isListening = false
     private var levelHistory: [Float] = []
     private let levelHistorySize = 8
@@ -291,10 +292,11 @@ final class AuroraAudioProcessor: ObservableObject {
     private var isBuiltInMic = true
 
     private let echoGateThreshold: Float = 0.1
-    private let echoGateAttack: Float = 0.55
+    private let echoGateAttack: Float = 0.75
     private let echoGateRelease: Float = 0.88
-    private let echoWetMixBase: Float = 70
-    private let echoWetMixRange: Float = 30
+    private let echoWetMixBase: Float = 85
+    private let echoWetMixRange: Float = 15
+    private let echoBoostDb: Float = 18
     private let sourceSmoothing: CGFloat = 0.15
 
     func startListening() {
@@ -316,6 +318,7 @@ final class AuroraAudioProcessor: ObservableObject {
         audioEngine = nil
         gateMixer = nil
         delayNode = nil
+        boostNode = nil
     }
 
     private func setupAudioEngine() {
@@ -338,11 +341,16 @@ final class AuroraAudioProcessor: ObservableObject {
             delay.lowPassCutoff = 12000
             delay.wetDryMix = 50
 
+            let boost = AVAudioUnitEQ(numberOfBands: 1)
+            boost.globalGain = echoBoostDb
+
             engine.attach(gateMixer)
             engine.attach(delay)
+            engine.attach(boost)
             engine.connect(inputNode, to: gateMixer, format: format)
             engine.connect(gateMixer, to: delay, format: format)
-            engine.connect(delay, to: engine.mainMixerNode, format: format)
+            engine.connect(delay, to: boost, format: format)
+            engine.connect(boost, to: engine.mainMixerNode, format: format)
 
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
                 self?.processAudioBuffer(buffer)
@@ -354,6 +362,7 @@ final class AuroraAudioProcessor: ObservableObject {
             self.audioEngine = engine
             self.gateMixer = gateMixer
             self.delayNode = delay
+            self.boostNode = boost
             self.isListening = true
         } catch {
             print("Aurora audio setup failed: \(error)")
