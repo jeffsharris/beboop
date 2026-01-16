@@ -46,6 +46,17 @@ struct VoiceAuroraView: View {
                     updateWaves(at: newDate)
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if !audioProcessor.debugText.isEmpty {
+                    Text(audioProcessor.debugText)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(10)
+                        .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.top, 12)
+                        .padding(.leading, 12)
+                }
+            }
             .ignoresSafeArea()
         }
         .onAppear {
@@ -281,6 +292,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
     @Published var sourcePoint: CGPoint = CGPoint(x: 0.5, y: 0.9)
+    @Published var debugText: String = ""
 
     private let captureQueue = DispatchQueue(label: "VoiceAurora.Capture")
     private let foaLayoutTag: AudioChannelLayoutTag = AudioChannelLayoutTag(kAudioChannelLayoutTag_HOA_ACN_SN3D | 4)
@@ -302,6 +314,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private let levelHistorySize = 8
     private var echoMix: Float = 0
     private var lastDirectionPoint = CGPoint(x: 0.5, y: 0.85)
+    private var lastAzimuth: Float = 0
+    private var lastElevation: Float = 0
+    private var lastConfidence: Float = 0
 
     private let echoGateThreshold: Float = 0.1
     private let echoGateAttack: Float = 0.75
@@ -316,6 +331,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
     private var duckingLevel: Float = 1.0
+    private var lastDebugUpdate: CFTimeInterval = 0
+    private let debugUpdateInterval: CFTimeInterval = 0.2
 
     func startListening() {
         guard !isListening else { return }
@@ -456,6 +473,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     private func processSpatialSamples(frames: Int,
+                                       channelCount: Int,
                                        sampleRate: Double,
                                        sampleAt: (_ frame: Int, _ channel: Int) -> Float) {
         guard frames > 0 else { return }
@@ -507,11 +525,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let logFreq = log2(estimatedFreq / 100.0) / 3.3
         let normalizedPitch = Float(min(1.0, max(0.0, logFreq)))
 
-        let directionPoint = resolveDirectionPoint(sumXW: sumXW,
-                                                   sumYW: sumYW,
-                                                   sumZW: sumZW,
-                                                   energy: sumW2,
-                                                   level: normalizedLevel)
+        let direction = resolveDirection(sumXW: sumXW,
+                                         sumYW: sumYW,
+                                         sumZW: sumZW,
+                                         energy: sumW2,
+                                         level: normalizedLevel)
 
         let targetEcho: Float = curvedLevel > echoGateThreshold ? 1.0 : 0.0
         if targetEcho > echoMix {
@@ -540,24 +558,43 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self.smoothedLevel = self.levelHistory.reduce(0, +) / Float(self.levelHistory.count)
             self.dominantPitch = self.dominantPitch * 0.85 + normalizedPitch * 0.15
 
-            let nextX = self.sourcePoint.x * (1 - self.sourceSmoothing) + directionPoint.x * self.sourceSmoothing
-            let nextY = self.sourcePoint.y * (1 - self.sourceSmoothing) + directionPoint.y * self.sourceSmoothing
+            let nextX = self.sourcePoint.x * (1 - self.sourceSmoothing) + direction.point.x * self.sourceSmoothing
+            let nextY = self.sourcePoint.y * (1 - self.sourceSmoothing) + direction.point.y * self.sourceSmoothing
             self.sourcePoint = CGPoint(x: nextX, y: nextY)
+
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - self.lastDebugUpdate > self.debugUpdateInterval {
+                let azimuthDegrees = Double(direction.azimuth * 180 / .pi)
+                let elevationDegrees = Double(direction.elevation * 180 / .pi)
+                self.debugText = String(format: "ch:%d  sr:%.0f  lvl:%.2f  conf:%.2f  az:%.0fdeg  el:%.0fdeg  x:%.2f  y:%.2f",
+                                        channelCount,
+                                        sampleRate,
+                                        Double(normalizedLevel),
+                                        Double(direction.confidence),
+                                        azimuthDegrees,
+                                        elevationDegrees,
+                                        Double(self.sourcePoint.x),
+                                        Double(self.sourcePoint.y))
+                self.lastDebugUpdate = now
+            }
         }
     }
 
-    private func resolveDirectionPoint(sumXW: Float,
-                                       sumYW: Float,
-                                       sumZW: Float,
-                                       energy: Float,
-                                       level: Float) -> CGPoint {
-        guard energy > 0 else { return lastDirectionPoint }
+    private func resolveDirection(sumXW: Float,
+                                  sumYW: Float,
+                                  sumZW: Float,
+                                  energy: Float,
+                                  level: Float) -> (point: CGPoint, azimuth: Float, elevation: Float, confidence: Float) {
+        guard energy > 0 else {
+            return (lastDirectionPoint, lastAzimuth, lastElevation, lastConfidence)
+        }
 
         let intensityMagnitude = sqrt(sumXW * sumXW + sumYW * sumYW + sumZW * sumZW)
         let confidence = min(1.0, intensityMagnitude / max(0.000001, energy))
 
         guard confidence > directionConfidenceThreshold, level > 0.04 else {
-            return lastDirectionPoint
+            lastConfidence = confidence
+            return (lastDirectionPoint, lastAzimuth, lastElevation, confidence)
         }
 
         let azimuth = atan2(sumYW, sumXW)
@@ -569,7 +606,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let clamped = CGPoint(x: CGFloat(horizontal).clamped(to: 0.1...0.9),
                               y: CGFloat(vertical).clamped(to: 0.1...0.9))
         lastDirectionPoint = clamped
-        return clamped
+        lastAzimuth = azimuth
+        lastElevation = elevation
+        lastConfidence = confidence
+        return (clamped, azimuth, elevation, confidence)
     }
 
     private func enqueuePlayback(_ buffer: AVAudioPCMBuffer) {
@@ -641,7 +681,7 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
                     return
                 }
 
-                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                processSpatialSamples(frames: frames, channelCount: channelCount, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return w[index]
                     case 1: return y[index]
@@ -655,7 +695,7 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
                     return
                 }
 
-                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                processSpatialSamples(frames: frames, channelCount: channelCount, sampleRate: sampleRate) { index, channel in
                     data[index * channelCount + channel]
                 }
             }
@@ -670,7 +710,7 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
                 }
 
                 let scale = 1.0 / Float(Int16.max)
-                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                processSpatialSamples(frames: frames, channelCount: channelCount, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return Float(w[index]) * scale
                     case 1: return Float(y[index]) * scale
@@ -685,7 +725,7 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
                 }
 
                 let scale = 1.0 / Float(Int16.max)
-                processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
+                processSpatialSamples(frames: frames, channelCount: channelCount, sampleRate: sampleRate) { index, channel in
                     Float(data[index * channelCount + channel]) * scale
                 }
             }
