@@ -33,7 +33,6 @@ final class AudioManager: NSObject, ObservableObject {
     override init() {
         super.init()
         setupAudioSession()
-        setupEngine()
     }
 
     private func setupAudioSession() {
@@ -43,15 +42,6 @@ final class AudioManager: NSObject, ObservableObject {
             try session.setActive(true)
         } catch {
             print("Audio session setup failed: \(error)")
-        }
-    }
-
-    private func setupEngine() {
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            print("Audio engine failed to start: \(error)")
         }
     }
 
@@ -350,7 +340,7 @@ final class AudioManager: NSObject, ObservableObject {
 
         if speed > 1.0 {
             let boosted = Float(octaves * 1200.0 * 1.25)
-            return min(boosted, 3000)
+            return min(boosted, 2400)
         } else {
             let softened = Float(octaves * 1200.0 * 0.35)
             return max(softened, -600)
