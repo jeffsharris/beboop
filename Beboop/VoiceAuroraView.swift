@@ -291,7 +291,10 @@ final class AuroraAudioProcessor: ObservableObject {
     private var isBuiltInMic = true
 
     private let echoGateThreshold: Float = 0.1
+    private let echoGateAttack: Float = 0.55
     private let echoGateRelease: Float = 0.88
+    private let echoWetMixBase: Float = 70
+    private let echoWetMixRange: Float = 30
     private let sourceSmoothing: CGFloat = 0.15
 
     func startListening() {
@@ -407,7 +410,11 @@ final class AuroraAudioProcessor: ObservableObject {
         let normalizedPitch = Float(min(1.0, max(0.0, logFreq)))
 
         let targetEcho: Float = curvedLevel > echoGateThreshold ? 1.0 : 0.0
-        echoMix = echoMix * echoGateRelease + targetEcho * (1 - echoGateRelease)
+        if targetEcho > echoMix {
+            echoMix = echoMix * (1 - echoGateAttack) + targetEcho * echoGateAttack
+        } else {
+            echoMix = echoMix * echoGateRelease + targetEcho * (1 - echoGateRelease)
+        }
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -424,7 +431,7 @@ final class AuroraAudioProcessor: ObservableObject {
             self.sourcePoint = CGPoint(x: nextX, y: nextY)
 
             self.gateMixer?.outputVolume = self.echoMix
-            self.delayNode?.wetDryMix = 45 + 35 * self.echoMix
+            self.delayNode?.wetDryMix = self.echoWetMixBase + self.echoWetMixRange * self.echoMix
         }
     }
 
