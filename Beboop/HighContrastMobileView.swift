@@ -531,7 +531,9 @@ struct HighContrastMobileView: View {
     private func playBounceChime(for shape: ShapeState, velocity: CGFloat) {
         guard velocity > 20 else { return }
 
-        let volume = min(1.0, Float(velocity) / 300.0)
+        let normalized = min(1.0, velocity / 500.0)
+        let shaped = pow(normalized, 1.3)
+        let volume = Float(shaped)
         let note = midiNote(for: shape)
         chimePlayer.playChime(note: note, volume: volume)
     }
