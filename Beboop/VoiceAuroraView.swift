@@ -333,6 +333,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var duckingLevel: Float = 1.0
     private var lastDebugUpdate: CFTimeInterval = 0
     private let debugUpdateInterval: CFTimeInterval = 0.2
+    private var lastFormatInfo: String = ""
 
     func startListening() {
         guard !isListening else { return }
@@ -579,7 +580,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             if now - self.lastDebugUpdate > self.debugUpdateInterval {
                 let azimuthDegrees = Double(direction.azimuth * 180 / .pi)
                 let elevationDegrees = Double(direction.elevation * 180 / .pi)
-                self.debugText = String(format: "ch:%d  sr:%.0f  lvl:%.2f  conf:%.2f  w:%.3f  x:%.3f  y:%.3f  z:%.3f\naz:%.0fdeg  el:%.0fdeg  x:%.2f  y:%.2f",
+                self.debugText = String(format: "ch:%d  sr:%.0f  lvl:%.2f  conf:%.2f  w:%.5f  x:%.5f  y:%.5f  z:%.5f\naz:%.0fdeg  el:%.0fdeg  x:%.2f  y:%.2f\n%@",
                                         channelCount,
                                         sampleRate,
                                         Double(normalizedLevel),
@@ -591,7 +592,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                         azimuthDegrees,
                                         elevationDegrees,
                                         Double(self.sourcePoint.x),
-                                        Double(self.sourcePoint.y))
+                                        Double(self.sourcePoint.y),
+                                        self.lastFormatInfo)
                 self.lastDebugUpdate = now
             }
         }
@@ -688,12 +690,15 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
         guard sampleRate > 0 else { return }
         if channelCount < 4 {
             DispatchQueue.main.async { [weak self] in
-                self?.debugText = String(format: "ch:%d  sr:%.0f  FOA unavailable",
+                self?.debugText = String(format: "ch:%d  sr:%.0f  FOA unavailable\n%@",
                                          channelCount,
-                                         sampleRate)
+                                         sampleRate,
+                                         self?.lastFormatInfo ?? "")
             }
             return
         }
+
+        updateFormatInfo(asbd: asbd.pointee)
 
         if isFloat {
             if isNonInterleaved {
@@ -753,7 +758,60 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
                     Float(data[index * channelCount + channel]) * scale
                 }
             }
+        } else if asbd.pointee.mBitsPerChannel == 32 {
+            if isNonInterleaved {
+                guard bufferList.count >= 4,
+                      let w = bufferList[0].mData?.assumingMemoryBound(to: Int32.self),
+                      let y = bufferList[1].mData?.assumingMemoryBound(to: Int32.self),
+                      let z = bufferList[2].mData?.assumingMemoryBound(to: Int32.self),
+                      let x = bufferList[3].mData?.assumingMemoryBound(to: Int32.self) else {
+                    return
+                }
+
+                let scale = 1.0 / Float(Int32.max)
+                processSpatialSamples(frames: frames, channelCount: channelCount, sampleRate: sampleRate) { index, channel in
+                    switch channel {
+                    case 0: return Float(w[index]) * scale
+                    case 1: return Float(y[index]) * scale
+                    case 2: return Float(z[index]) * scale
+                    default: return Float(x[index]) * scale
+                    }
+                }
+            } else {
+                guard bufferList.count == 1,
+                      let data = bufferList[0].mData?.assumingMemoryBound(to: Int32.self) else {
+                    return
+                }
+
+                let scale = 1.0 / Float(Int32.max)
+                processSpatialSamples(frames: frames, channelCount: channelCount, sampleRate: sampleRate) { index, channel in
+                    Float(data[index * channelCount + channel]) * scale
+                }
+            }
         }
+    }
+
+    private func updateFormatInfo(asbd: AudioStreamBasicDescription) {
+        let formatID = AuroraAudioProcessor.fourccString(asbd.mFormatID)
+        let flags = String(format: "0x%X", asbd.mFormatFlags)
+        let bits = asbd.mBitsPerChannel
+        let bytesPerFrame = asbd.mBytesPerFrame
+        let interleaving = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 ? "non-int" : "int"
+        let floatFlag = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0 ? "float" : "int"
+        let info = "fmt:\(formatID) \(floatFlag) \(interleaving) bits:\(bits) bpf:\(bytesPerFrame) flags:\(flags)"
+        if info != lastFormatInfo {
+            lastFormatInfo = info
+        }
+    }
+
+    private static func fourccString(_ code: FourCharCode) -> String {
+        let chars: [UInt8] = [
+            UInt8((code >> 24) & 0xFF),
+            UInt8((code >> 16) & 0xFF),
+            UInt8((code >> 8) & 0xFF),
+            UInt8(code & 0xFF)
+        ]
+        return String(bytes: chars, encoding: .ascii) ?? "\(code)"
     }
 
     private static func audioBufferListSize(maximumBuffers: Int) -> Int {
