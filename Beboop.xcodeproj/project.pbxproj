@@ -12,6 +12,8 @@
 		5A388478A656F778AAC7EEE4 /* boop.wav in Resources */ = {isa = PBXBuildFile; fileRef = 45DCC71EB4C808EC243FDE0A /* boop.wav */; };
 		894DF4D5B11979FCE45DCB80 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 610918B689732B2C9B11B115 /* LaunchScreen.storyboard */; };
 		C02990BD5B54FC8146DD49FC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA043C45623C35A53106429 /* ContentView.swift */; };
+		E6A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */; };
+		F2B3C4D5E6F7A8B9C0D1E2F3 /* HighContrastMobileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* AudioManager.swift */; };
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* SoundTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */; };
 /* End PBXBuildFile section */
@@ -26,6 +28,8 @@
 		AAF3D3CD174DC58CBDD91B5B /* BeboopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeboopApp.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundTileView.swift; sourceTree = "<group>"; };
+		E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeSwitcherView.swift; sourceTree = "<group>"; };
+		F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighContrastMobileView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -36,8 +40,10 @@
 				B2C3D4E5F6A7B8C9D0E1F2A3 /* AudioManager.swift */,
 				AAF3D3CD174DC58CBDD91B5B /* BeboopApp.swift */,
 				2AA043C45623C35A53106429 /* ContentView.swift */,
+				F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */,
 				34C72DE8A2B6C9C8FB0E05E5 /* Info.plist */,
 				610918B689732B2C9B11B115 /* LaunchScreen.storyboard */,
+				E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */,
 				D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */,
 				646EC591E161AFBCFBAC7FB0 /* Resources */,
 			);
@@ -137,6 +143,8 @@
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* AudioManager.swift in Sources */,
 				4DE5AC5FFB0516EC68DE3D4A /* BeboopApp.swift in Sources */,
 				C02990BD5B54FC8146DD49FC /* ContentView.swift in Sources */,
+				F2B3C4D5E6F7A8B9C0D1E2F3 /* HighContrastMobileView.swift in Sources */,
+				E6A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift in Sources */,
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* SoundTileView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

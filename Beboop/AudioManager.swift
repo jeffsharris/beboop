@@ -1,13 +1,23 @@
 import AVFoundation
 import UIKit
 
-final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
+final class AudioManager: NSObject, ObservableObject {
+    private struct PlaybackChain {
+        let player: AVAudioPlayerNode
+        let timePitchA: AVAudioUnitTimePitch
+        let timePitchB: AVAudioUnitTimePitch
+        let mixer: AVAudioMixerNode
+    }
+
+    private let engine = AVAudioEngine()
     private var recorder: AVAudioRecorder?
-    private var players: [Int: AVAudioPlayer] = [:]
+    private var playbackChains: [Int: PlaybackChain] = [:]
+    private var buffers: [Int: AVAudioPCMBuffer] = [:]
+    private var loopingTiles: Set<Int> = []
+    private var activeTaps: Set<Int> = []
     private let fileManager = FileManager.default
     private var recordingStartDate: Date?
     private let minimumRecordingDuration: TimeInterval = 0.5
-    private var meterTimers: [Int: Timer] = [:]
 
     @Published var isRecording = false
     @Published var currentRecordingTile: Int?
@@ -20,8 +30,10 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
     static let defaultSpeed: Float = 1.0
     static let speedStep: Float = 0.05
 
-    init() {
+    override init() {
+        super.init()
         setupAudioSession()
+        setupEngine()
     }
 
     private func setupAudioSession() {
@@ -31,6 +43,24 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
             try session.setActive(true)
         } catch {
             print("Audio session setup failed: \(error)")
+        }
+    }
+
+    private func setupEngine() {
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            print("Audio engine failed to start: \(error)")
+        }
+    }
+
+    private func ensureEngineRunning() {
+        guard !engine.isRunning else { return }
+        do {
+            try engine.start()
+        } catch {
+            print("Audio engine failed to restart: \(error)")
         }
     }
 
@@ -87,13 +117,17 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
         currentRecordingTile = nil
         recordingStartDate = nil
 
-        if let tileIndex = recordedTile, recordingDuration < minimumRecordingDuration {
-            let url = audioFileURL(for: tileIndex)
-            if fileManager.fileExists(atPath: url.path) {
-                do {
-                    try fileManager.removeItem(at: url)
-                } catch {
-                    print("Failed to delete short recording: \(error)")
+        if let tileIndex = recordedTile {
+            buffers[tileIndex] = nil
+
+            if recordingDuration < minimumRecordingDuration {
+                let url = audioFileURL(for: tileIndex)
+                if fileManager.fileExists(atPath: url.path) {
+                    do {
+                        try fileManager.removeItem(at: url)
+                    } catch {
+                        print("Failed to delete short recording: \(error)")
+                    }
                 }
             }
         }
@@ -106,67 +140,77 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
 
     func play(tileIndex: Int) {
         stopPlayback(for: tileIndex)
+        loopingTiles.remove(tileIndex)
 
-        let url = audioFileURL(for: tileIndex)
-
-        guard fileManager.fileExists(atPath: url.path) else {
+        guard let buffer = buffer(for: tileIndex) else {
             return
         }
 
-        do {
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.enableRate = true
-            player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
-            player.delegate = self
-            player.prepareToPlay()
-            player.play()
+        let chain = playbackChain(for: tileIndex)
+        updateTimePitch(for: tileIndex, chain: chain)
 
-            players[tileIndex] = player
-            startMetering(for: tileIndex, player: player)
-
-            let generator = UIImpactFeedbackGenerator(style: .soft)
-            generator.impactOccurred()
-        } catch {
-            print("Playback failed: \(error)")
+        chain.player.stop()
+        chain.player.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+            DispatchQueue.main.async {
+                self?.stopPlayback(for: tileIndex)
+            }
         }
+
+        ensureEngineRunning()
+        if !chain.player.isPlaying {
+            chain.player.play()
+        }
+
+        startMetering(for: tileIndex, on: chain.mixer)
+
+        let generator = UIImpactFeedbackGenerator(style: .soft)
+        generator.impactOccurred()
     }
 
     func startLooping(tileIndex: Int) {
         stopPlayback(for: tileIndex)
+        loopingTiles.insert(tileIndex)
 
-        let url = audioFileURL(for: tileIndex)
-
-        guard fileManager.fileExists(atPath: url.path) else {
+        guard let buffer = buffer(for: tileIndex) else {
             return
         }
 
-        do {
-            let player = try AVAudioPlayer(contentsOf: url)
-            player.enableRate = true
-            player.rate = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
-            player.numberOfLoops = -1
-            player.delegate = self
-            player.prepareToPlay()
-            player.play()
+        let chain = playbackChain(for: tileIndex)
+        updateTimePitch(for: tileIndex, chain: chain)
 
-            players[tileIndex] = player
-            startMetering(for: tileIndex, player: player)
-        } catch {
-            print("Looped playback failed: \(error)")
-        }
+        scheduleLoop(for: tileIndex, buffer: buffer, chain: chain)
     }
 
     func stopLoopingAfterCurrent(tileIndex: Int) {
-        guard let player = players[tileIndex] else { return }
-        if player.numberOfLoops == -1 {
-            player.numberOfLoops = 0
+        loopingTiles.remove(tileIndex)
+    }
+
+    private func scheduleLoop(for tileIndex: Int, buffer: AVAudioPCMBuffer, chain: PlaybackChain) {
+        chain.player.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if self.loopingTiles.contains(tileIndex) {
+                    self.scheduleLoop(for: tileIndex, buffer: buffer, chain: chain)
+                } else {
+                    self.stopPlayback(for: tileIndex)
+                }
+            }
         }
+
+        ensureEngineRunning()
+        if !chain.player.isPlaying {
+            chain.player.play()
+        }
+
+        startMetering(for: tileIndex, on: chain.mixer)
     }
 
     private func stopPlayback(for tileIndex: Int) {
-        players[tileIndex]?.stop()
-        players[tileIndex] = nil
-        stopMetering(for: tileIndex)
+        loopingTiles.remove(tileIndex)
+        if let chain = playbackChains[tileIndex] {
+            chain.player.stop()
+            stopMetering(for: tileIndex, on: chain.mixer)
+        }
     }
 
     func hasRecording(for tileIndex: Int) -> Bool {
@@ -177,7 +221,7 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
     // MARK: - Playback Speed
 
     func getPlaybackSpeed(for tileIndex: Int) -> Float {
-        return playbackSpeeds[tileIndex] ?? Self.defaultSpeed
+        playbackSpeeds[tileIndex] ?? Self.defaultSpeed
     }
 
     func setPlaybackSpeed(for tileIndex: Int, speed: Float) {
@@ -186,13 +230,17 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
         let normalizedSpeed = min(max(steppedSpeed, Self.minSpeed), Self.maxSpeed)
         playbackSpeeds[tileIndex] = normalizedSpeed
 
-        if let player = players[tileIndex], player.isPlaying {
-            player.rate = normalizedSpeed
+        if let chain = playbackChains[tileIndex] {
+            updateTimePitch(for: tileIndex, chain: chain)
         }
     }
 
     func resetPlaybackSpeed(for tileIndex: Int) {
         playbackSpeeds[tileIndex] = Self.defaultSpeed
+
+        if let chain = playbackChains[tileIndex] {
+            updateTimePitch(for: tileIndex, chain: chain)
+        }
 
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
@@ -205,6 +253,7 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
 
         playbackSpeeds[tileIndex] = nil
         playbackLevels[tileIndex] = nil
+        buffers[tileIndex] = nil
 
         let url = audioFileURL(for: tileIndex)
 
@@ -232,43 +281,120 @@ final class AudioManager: ObservableObject, AVAudioPlayerDelegate {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
-    // MARK: - Metering
+    // MARK: - Playback Helpers
 
-    private func startMetering(for tileIndex: Int, player: AVAudioPlayer) {
-        stopMetering(for: tileIndex)
-        playbackLevels[tileIndex] = 0
-        player.isMeteringEnabled = true
-
-        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self, weak player] _ in
-            guard let self = self, let player = player else {
-                self?.stopMetering(for: tileIndex)
-                return
-            }
-
-            guard player.isPlaying else {
-                self.stopMetering(for: tileIndex)
-                return
-            }
-
-            player.updateMeters()
-            let power = player.averagePower(forChannel: 0)
-            let linear = pow(10.0, power / 20.0)
-            let normalized = min(1.0, max(0.0, (linear - 0.02) / 0.98))
-            self.playbackLevels[tileIndex] = Float(normalized)
+    private func playbackChain(for tileIndex: Int) -> PlaybackChain {
+        if let chain = playbackChains[tileIndex] {
+            return chain
         }
 
-        meterTimers[tileIndex] = timer
+        let player = AVAudioPlayerNode()
+        let timePitchA = AVAudioUnitTimePitch()
+        let timePitchB = AVAudioUnitTimePitch()
+        let mixer = AVAudioMixerNode()
+
+        engine.attach(player)
+        engine.attach(timePitchA)
+        engine.attach(timePitchB)
+        engine.attach(mixer)
+
+        engine.connect(player, to: timePitchA, format: nil)
+        engine.connect(timePitchA, to: timePitchB, format: nil)
+        engine.connect(timePitchB, to: mixer, format: nil)
+        engine.connect(mixer, to: engine.mainMixerNode, format: nil)
+
+        let chain = PlaybackChain(player: player, timePitchA: timePitchA, timePitchB: timePitchB, mixer: mixer)
+        playbackChains[tileIndex] = chain
+        updateTimePitch(for: tileIndex, chain: chain)
+        ensureEngineRunning()
+        return chain
     }
 
-    private func stopMetering(for tileIndex: Int) {
-        meterTimers[tileIndex]?.invalidate()
-        meterTimers[tileIndex] = nil
+    private func buffer(for tileIndex: Int) -> AVAudioPCMBuffer? {
+        if let cached = buffers[tileIndex] {
+            return cached
+        }
+
+        let url = audioFileURL(for: tileIndex)
+        guard fileManager.fileExists(atPath: url.path) else {
+            return nil
+        }
+
+        do {
+            let file = try AVAudioFile(forReading: url)
+            let format = file.processingFormat
+            let frameCount = AVAudioFrameCount(file.length)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                return nil
+            }
+            try file.read(into: buffer)
+            buffers[tileIndex] = buffer
+            return buffer
+        } catch {
+            print("Failed to load audio buffer: \(error)")
+            return nil
+        }
+    }
+
+    private func updateTimePitch(for tileIndex: Int, chain: PlaybackChain) {
+        let speed = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
+        let rateComponent = Float(sqrt(Double(speed)))
+        chain.timePitchA.rate = rateComponent
+        chain.timePitchB.rate = rateComponent
+        chain.timePitchB.pitch = pitchCents(for: speed)
+    }
+
+    private func pitchCents(for speed: Float) -> Float {
+        guard speed != 1.0 else { return 0 }
+        let octaves = log2(Double(speed))
+
+        if speed > 1.0 {
+            let boosted = Float(octaves * 1200.0 * 1.25)
+            return min(boosted, 3000)
+        } else {
+            let softened = Float(octaves * 1200.0 * 0.35)
+            return max(softened, -600)
+        }
+    }
+
+    // MARK: - Metering
+
+    private func startMetering(for tileIndex: Int, on node: AVAudioNode) {
+        stopMetering(for: tileIndex, on: node)
+
+        let format = node.outputFormat(forBus: 0)
+        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            guard let self = self else { return }
+            let level = self.rmsLevel(from: buffer)
+            DispatchQueue.main.async {
+                self.playbackLevels[tileIndex] = level
+            }
+        }
+
+        activeTaps.insert(tileIndex)
+    }
+
+    private func stopMetering(for tileIndex: Int, on node: AVAudioNode) {
+        if activeTaps.contains(tileIndex) {
+            node.removeTap(onBus: 0)
+            activeTaps.remove(tileIndex)
+        }
         playbackLevels[tileIndex] = 0
     }
 
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        guard let tileIndex = players.first(where: { $0.value === player })?.key else { return }
-        players[tileIndex] = nil
-        stopMetering(for: tileIndex)
+    private func rmsLevel(from buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData else { return 0 }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return 0 }
+
+        let data = channelData.pointee
+        var sum: Float = 0
+        for index in 0..<frames {
+            let value = data[index]
+            sum += value * value
+        }
+        let rms = sqrt(sum / Float(frames))
+        let normalized = min(1.0, max(0.0, rms * 6.0))
+        return normalized
     }
 }
