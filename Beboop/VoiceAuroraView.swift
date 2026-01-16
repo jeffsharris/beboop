@@ -46,15 +46,15 @@ struct VoiceAuroraView: View {
                     updateWaves(at: newDate)
                 }
             }
-            .overlay(alignment: .topLeading) {
+            .overlay(alignment: .bottomLeading) {
                 if !audioProcessor.debugText.isEmpty {
                     Text(audioProcessor.debugText)
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white)
                         .padding(10)
                         .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-                        .padding(.top, 12)
                         .padding(.leading, 12)
+                        .padding(.bottom, geometry.safeAreaInsets.bottom + 12)
                 }
             }
             .ignoresSafeArea()
@@ -476,7 +476,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                        channelCount: Int,
                                        sampleRate: Double,
                                        sampleAt: (_ frame: Int, _ channel: Int) -> Float) {
-        guard frames > 0 else { return }
+        guard frames > 0, sampleRate > 0 else { return }
         ensurePlaybackEngine(sampleRate: sampleRate)
         guard let playbackFormat = playbackFormat else { return }
 
@@ -637,14 +637,12 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
             return
         }
 
-        let channelCount = Int(asbd.pointee.mChannelsPerFrame)
-        guard channelCount >= 4 else { return }
-
         let frames = CMSampleBufferGetNumSamples(sampleBuffer)
         guard frames > 0 else { return }
 
         let isFloat = (asbd.pointee.mFormatFlags & kAudioFormatFlagIsFloat) != 0
         let isNonInterleaved = (asbd.pointee.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let channelCount = Int(asbd.pointee.mChannelsPerFrame)
         let bufferCount = isNonInterleaved ? channelCount : 1
         let bufferListSize = AuroraAudioProcessor.audioBufferListSize(maximumBuffers: bufferCount)
         let rawPointer = UnsafeMutableRawPointer.allocate(byteCount: bufferListSize,
@@ -670,6 +668,15 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
 
         let bufferList = UnsafeMutableAudioBufferListPointer(audioBufferList)
         let sampleRate = asbd.pointee.mSampleRate
+        guard sampleRate > 0 else { return }
+        if channelCount < 4 {
+            DispatchQueue.main.async { [weak self] in
+                self?.debugText = String(format: "ch:%d  sr:%.0f  FOA unavailable",
+                                         channelCount,
+                                         sampleRate)
+            }
+            return
+        }
 
         if isFloat {
             if isNonInterleaved {
