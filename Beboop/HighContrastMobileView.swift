@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UIKit
 
 struct HighContrastMobileView: View {
     private struct ShapeState: Identifiable {
@@ -8,37 +9,28 @@ struct HighContrastMobileView: View {
             case roundedRect
             case capsule
             case blob
-
-            // Each shape has its own musical note (MIDI note number)
-            var midiNote: UInt8 {
-                switch self {
-                case .circle: return 72      // C5
-                case .roundedRect: return 76 // E5
-                case .capsule: return 79     // G5
-                case .blob: return 84        // C6
-                }
-            }
         }
 
         let id = UUID()
         let kind: Kind
-        var position: CGPoint      // Current position (absolute pixels)
-        var velocity: CGPoint      // Velocity (pixels per second)
-        let baseSize: CGSize       // Base size (normalized 0-1)
+        var position: CGPoint
+        var velocity: CGPoint
+        let baseSize: CGSize
+        var sizeScale: CGFloat
+        var baselineSpeed: CGFloat
         let rotation: Angle
+        let color: Color
+        let contour: [CGPoint]
     }
 
-    // User-controlled parameters
-    @State private var sizeMultiplier: CGFloat = 1.0
-    @State private var baselineSpeedMultiplier: CGFloat = 1.0
-
     // Gesture tracking
-    @State private var isDragging = false
-    @State private var dragStart: CGPoint = .zero
     @State private var draggedShapeIndex: Int? = nil
     @State private var lastDragPosition: CGPoint = .zero
     @State private var lastDragTime: Date = .distantPast
     @State private var dragVelocity: CGPoint = .zero
+    @State private var adjustingShapeIndex: Int? = nil
+    @State private var adjustStartSize: CGFloat = 1.0
+    @State private var adjustStartBaseline: CGFloat = 0.0
 
     // Animation state
     @State private var shapes: [ShapeState] = []
@@ -48,26 +40,21 @@ struct HighContrastMobileView: View {
     // Audio
     @StateObject private var chimePlayer = ChimePlayer()
 
-    // Speed and size limits
-    private let minSize: CGFloat = 0.5
-    private let maxSize: CGFloat = 2.0
+    // Size and speed limits
+    private let minShapeScale: CGFloat = 0.6
+    private let maxShapeScale: CGFloat = 1.8
     private let minBaselineSpeed: CGFloat = 0.0
-    private let maxBaselineSpeed: CGFloat = 2.5
+    private let maxBaselineSpeed: CGFloat = 240.0
+    private let minBaseSize: CGFloat = 0.12
+    private let maxBaseSize: CGFloat = 0.24
+    private let initialShapeCount = 5
+    private let contourPointCount = 48
 
     // Physics
     private let damping: CGFloat = 0.985
     private let maxVelocity: CGFloat = 900  // Cap velocity to keep things playable
     private let collisionRestitution: CGFloat = 0.9
     private let collisionCooldown: TimeInterval = 0.12
-
-    // Initial shape configurations
-    private let initialConfigs: [(ShapeState.Kind, CGPoint, CGSize, CGFloat, Angle)] = [
-        (.circle, CGPoint(x: 0.15, y: 0.2), CGSize(width: 0.22, height: 0.22), 80, .degrees(0)),
-        (.roundedRect, CGPoint(x: 0.6, y: 0.4), CGSize(width: 0.26, height: 0.18), 65, .degrees(15)),
-        (.capsule, CGPoint(x: 0.3, y: 0.7), CGSize(width: 0.28, height: 0.15), 70, .degrees(-10)),
-        (.blob, CGPoint(x: 0.75, y: 0.25), CGSize(width: 0.24, height: 0.2), 55, .degrees(8)),
-        (.circle, CGPoint(x: 0.5, y: 0.85), CGSize(width: 0.2, height: 0.2), 90, .degrees(0))
-    ]
 
     @State private var lastCollisionTimes: [String: Date] = [:]
 
@@ -99,11 +86,14 @@ struct HighContrastMobileView: View {
                 }
                 .gesture(combinedGesture)
             }
-
-            // Speed/size indicator overlay
-            if isDragging && draggedShapeIndex == nil {
-                controlIndicator
-            }
+            TwoFingerGestureOverlay(
+                onPanBegan: handleTwoFingerPanBegan,
+                onPanChanged: handleTwoFingerPanChanged,
+                onPanEnded: handleTwoFingerPanEnded,
+                onTap: handleTwoFingerTap,
+                onDoubleTap: handleTwoFingerDoubleTap
+            )
+            .ignoresSafeArea()
         }
     }
 
@@ -122,13 +112,11 @@ struct HighContrastMobileView: View {
     private func handleDragChanged(_ value: DragGesture.Value) {
         let location = value.location
 
-        // Check if we're starting a new drag
-        if !isDragging {
-            isDragging = true
-            dragStart = value.startLocation
-
-            // Check if we hit a shape
-            draggedShapeIndex = hitTest(at: value.startLocation)
+        if draggedShapeIndex == nil {
+            guard adjustingShapeIndex == nil else { return }
+            guard let hit = hitTest(at: value.startLocation) else { return }
+            draggedShapeIndex = hit
+            dragVelocity = .zero
             lastDragPosition = location
             lastDragTime = value.time
         }
@@ -150,20 +138,6 @@ struct HighContrastMobileView: View {
             resolveCollisions(iterations: 1)
             lastDragPosition = location
             lastDragTime = value.time
-        } else {
-            // Control speed/size
-            let delta = CGPoint(
-                x: location.x - dragStart.x,
-                y: location.y - dragStart.y
-            )
-
-            // Vertical drag controls baseline speed
-            let speedDelta = -delta.y / 200.0
-            baselineSpeedMultiplier = min(maxBaselineSpeed, max(minBaselineSpeed, 1.0 + speedDelta))
-
-            // Horizontal drag controls size
-            let sizeDelta = delta.x / 200.0
-            sizeMultiplier = min(maxSize, max(minSize, 1.0 + sizeDelta))
         }
     }
 
@@ -175,67 +149,58 @@ struct HighContrastMobileView: View {
             newVelocity.y *= flingBoost
 
             clampVelocity(&newVelocity)
-            newVelocity = enforceBaselineVelocity(newVelocity)
+            newVelocity = enforceBaselineVelocity(newVelocity, baselineSpeed: shapes[shapeIndex].baselineSpeed)
             shapes[shapeIndex].velocity = newVelocity
         }
 
-        isDragging = false
         draggedShapeIndex = nil
         dragVelocity = .zero
     }
 
-    private func hitTest(at point: CGPoint) -> Int? {
-        let minDim = min(screenSize.width, screenSize.height)
-
-        for (index, shape) in shapes.enumerated().reversed() {
-            let width = minDim * shape.baseSize.width * sizeMultiplier
-            let height = minDim * shape.baseSize.height * sizeMultiplier
-
-            let shapeRect = CGRect(
-                x: shape.position.x - width / 2,
-                y: shape.position.y - height / 2,
-                width: width,
-                height: height
-            )
-
-            if shapeRect.contains(point) {
-                return index
-            }
+    private func handleTwoFingerPanBegan(_ location: CGPoint) {
+        guard let hit = hitTest(at: location) else {
+            adjustingShapeIndex = nil
+            return
         }
-        return nil
+        adjustingShapeIndex = hit
+        adjustStartSize = shapes[hit].sizeScale
+        adjustStartBaseline = shapes[hit].baselineSpeed
+        draggedShapeIndex = nil
+        dragVelocity = .zero
     }
 
-    private var controlIndicator: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 16) {
-                Label {
-                    Text(String(format: "%.1fx", baselineSpeedMultiplier))
-                        .monospacedDigit()
-                } icon: {
-                    Image(systemName: "speedometer")
-                }
+    private func handleTwoFingerPanChanged(_ translation: CGPoint) {
+        guard let index = adjustingShapeIndex else { return }
 
-                Label {
-                    Text(String(format: "%.1fx", sizeMultiplier))
-                        .monospacedDigit()
-                } icon: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                }
-            }
-            .font(.system(size: 16, weight: .semibold, design: .rounded))
-            .foregroundColor(.black.opacity(0.7))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                Capsule()
-                    .fill(.white.opacity(0.9))
-                    .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
-            )
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, 60)
-        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-        .animation(.easeOut(duration: 0.2), value: isDragging)
+        let sizeDelta = translation.x / 200.0
+        let speedAdjustmentScale = (maxBaselineSpeed - minBaselineSpeed) / 260.0
+        let speedDelta = -translation.y * speedAdjustmentScale
+
+        var shape = shapes[index]
+        shape.sizeScale = (adjustStartSize + sizeDelta).clamped(to: minShapeScale...maxShapeScale)
+        shape.baselineSpeed = (adjustStartBaseline + speedDelta).clamped(to: minBaselineSpeed...maxBaselineSpeed)
+        shape.position = clampedPosition(for: shape, proposed: shape.position, in: screenSize)
+        shape.velocity = enforceBaselineVelocity(shape.velocity, baselineSpeed: shape.baselineSpeed)
+        shapes[index] = shape
+
+        resolveCollisions(iterations: 2)
+    }
+
+    private func handleTwoFingerPanEnded(_ velocity: CGPoint) {
+        _ = velocity
+        adjustingShapeIndex = nil
+    }
+
+    private func handleTwoFingerTap(_ location: CGPoint) {
+        guard hitTest(at: location) == nil else { return }
+        addShape(at: location)
+    }
+
+    private func handleTwoFingerDoubleTap(_ location: CGPoint) {
+        guard let index = hitTest(at: location) else { return }
+        shapes.remove(at: index)
+        adjustingShapeIndex = nil
+        draggedShapeIndex = nil
     }
 
     // MARK: - Physics
@@ -243,28 +208,83 @@ struct HighContrastMobileView: View {
     private func initializeShapesIfNeeded(in size: CGSize) {
         guard shapes.isEmpty, size.width > 1, size.height > 1 else { return }
 
-        initializeShapes(in: size)
-    }
-
-    private func initializeShapes(in size: CGSize) {
-        shapes = initialConfigs.map { config in
-            let (kind, startNorm, baseSize, speed, rotation) = config
-            // Randomize initial velocity direction
-            let angle = Double.random(in: 0..<(2 * .pi))
-            let baselineSpeed = speed * baselineSpeedMultiplier
-            let velocity = CGPoint(
-                x: cos(angle) * baselineSpeed,
-                y: sin(angle) * baselineSpeed
-            )
-            return ShapeState(
-                kind: kind,
-                position: CGPoint(x: startNorm.x * size.width, y: startNorm.y * size.height),
-                velocity: velocity,
-                baseSize: baseSize,
-                rotation: rotation
-            )
+        shapes = (0..<initialShapeCount).map { _ in
+            makeRandomShape(in: size)
         }
         lastUpdateTime = Date()
+    }
+
+    private func makeRandomShape(in size: CGSize, position: CGPoint? = nil) -> ShapeState {
+        let kind = ShapeState.Kind.allCases.randomElement() ?? .circle
+        let baseSize = randomBaseSize(for: kind)
+        let sizeScale = CGFloat.random(in: 0.75...1.25).clamped(to: minShapeScale...maxShapeScale)
+        let baselineSpeed = CGFloat.random(in: 60...140).clamped(to: minBaselineSpeed...maxBaselineSpeed)
+        let angle = Double.random(in: 0..<(2 * .pi))
+        let velocity = CGPoint(
+            x: cos(angle) * baselineSpeed,
+            y: sin(angle) * baselineSpeed
+        )
+        let rotation = Angle.degrees(Double.random(in: -18...18))
+        let color = randomColor()
+        let contour = contourPoints(for: kind, pointCount: contourPointCount)
+        let initialPosition = position ?? randomPosition(for: baseSize, sizeScale: sizeScale, in: size)
+        var shape = ShapeState(
+            kind: kind,
+            position: initialPosition,
+            velocity: velocity,
+            baseSize: baseSize,
+            sizeScale: sizeScale,
+            baselineSpeed: baselineSpeed,
+            rotation: rotation,
+            color: color,
+            contour: contour
+        )
+        shape.position = clampedPosition(for: shape, proposed: shape.position, in: size)
+        return shape
+    }
+
+    private func addShape(at location: CGPoint) {
+        let newShape = makeRandomShape(in: screenSize, position: location)
+        shapes.append(newShape)
+        resolveCollisions(iterations: 2)
+    }
+
+    private func randomBaseSize(for kind: ShapeState.Kind) -> CGSize {
+        let base = CGFloat.random(in: minBaseSize...maxBaseSize)
+        switch kind {
+        case .circle:
+            return CGSize(width: base, height: base)
+        case .roundedRect:
+            let width = (base * CGFloat.random(in: 0.9...1.2)).clamped(to: minBaseSize...maxBaseSize)
+            let height = (base * CGFloat.random(in: 0.9...1.2)).clamped(to: minBaseSize...maxBaseSize)
+            return CGSize(width: width, height: height)
+        case .capsule:
+            let width = (base * CGFloat.random(in: 1.4...1.9)).clamped(to: minBaseSize...maxBaseSize)
+            let height = (base * CGFloat.random(in: 0.6...0.85)).clamped(to: minBaseSize...maxBaseSize)
+            return CGSize(width: width, height: height)
+        case .blob:
+            let width = (base * CGFloat.random(in: 0.9...1.3)).clamped(to: minBaseSize...maxBaseSize)
+            let height = (base * CGFloat.random(in: 0.9...1.3)).clamped(to: minBaseSize...maxBaseSize)
+            return CGSize(width: width, height: height)
+        }
+    }
+
+    private func randomPosition(for baseSize: CGSize, sizeScale: CGFloat, in size: CGSize) -> CGPoint {
+        let minDim = min(size.width, size.height)
+        let width = minDim * baseSize.width * sizeScale
+        let height = minDim * baseSize.height * sizeScale
+        let insetX = min(width * 0.6, size.width * 0.45)
+        let insetY = min(height * 0.6, size.height * 0.45)
+        let x = CGFloat.random(in: insetX...(size.width - insetX))
+        let y = CGFloat.random(in: insetY...(size.height - insetY))
+        return CGPoint(x: x, y: y)
+    }
+
+    private func randomColor() -> Color {
+        let hue = Double.random(in: 0...1)
+        let saturation = Double.random(in: 0.45...0.75)
+        let brightness = Double.random(in: 0.75...0.95)
+        return Color(hue: hue, saturation: saturation, brightness: brightness)
     }
 
     private func updateShapesForResize(from oldSize: CGSize, to newSize: CGSize) {
@@ -300,8 +320,7 @@ struct HighContrastMobileView: View {
         }
 
         for i in shapes.indices {
-            // Skip shape being dragged
-            if draggedShapeIndex == i { continue }
+            if draggedShapeIndex == i || adjustingShapeIndex == i { continue }
 
             var shape = shapes[i]
 
@@ -323,10 +342,6 @@ struct HighContrastMobileView: View {
         lastUpdateTime = date
     }
 
-    private var baselineSpeed: CGFloat {
-        baselineSpeedMultiplier * 80
-    }
-
     private func resolveCollisions(iterations: Int) {
         for _ in 0..<iterations {
             resolveWallCollisions()
@@ -339,47 +354,52 @@ struct HighContrastMobileView: View {
     private func resolveWallCollisions() {
         for index in shapes.indices {
             let isDragged = draggedShapeIndex == index
+            let isAdjusting = adjustingShapeIndex == index
             var shape = shapes[index]
-            let halfSize = halfSize(for: shape)
             var velocity = isDragged ? dragVelocity : shape.velocity
             var didHitWall = false
+            let bounds = polygonBounds(worldContour(for: shape))
 
-            if shape.position.x - halfSize.width < 0 {
-                shape.position.x = halfSize.width
+            var offset = CGPoint.zero
+            if bounds.minX < 0 {
+                offset.x = -bounds.minX
                 if velocity.x < 0 {
-                    velocity.x = isDragged ? 0 : -velocity.x * collisionRestitution
+                    velocity.x = isDragged || isAdjusting ? 0 : -velocity.x * collisionRestitution
                     didHitWall = true
                 }
-            } else if shape.position.x + halfSize.width > screenSize.width {
-                shape.position.x = screenSize.width - halfSize.width
+            } else if bounds.maxX > screenSize.width {
+                offset.x = screenSize.width - bounds.maxX
                 if velocity.x > 0 {
-                    velocity.x = isDragged ? 0 : -velocity.x * collisionRestitution
+                    velocity.x = isDragged || isAdjusting ? 0 : -velocity.x * collisionRestitution
                     didHitWall = true
                 }
             }
 
-            if shape.position.y - halfSize.height < 0 {
-                shape.position.y = halfSize.height
+            if bounds.minY < 0 {
+                offset.y = -bounds.minY
                 if velocity.y < 0 {
-                    velocity.y = isDragged ? 0 : -velocity.y * collisionRestitution
+                    velocity.y = isDragged || isAdjusting ? 0 : -velocity.y * collisionRestitution
                     didHitWall = true
                 }
-            } else if shape.position.y + halfSize.height > screenSize.height {
-                shape.position.y = screenSize.height - halfSize.height
+            } else if bounds.maxY > screenSize.height {
+                offset.y = screenSize.height - bounds.maxY
                 if velocity.y > 0 {
-                    velocity.y = isDragged ? 0 : -velocity.y * collisionRestitution
+                    velocity.y = isDragged || isAdjusting ? 0 : -velocity.y * collisionRestitution
                     didHitWall = true
                 }
             }
+
+            shape.position.x += offset.x
+            shape.position.y += offset.y
 
             if didHitWall {
                 let impactSpeed = max(abs(velocity.x), abs(velocity.y))
-                playBounceChime(for: shape.kind, velocity: impactSpeed)
+                playBounceChime(for: shape, velocity: impactSpeed)
             }
 
             if isDragged {
                 dragVelocity = velocity
-            } else {
+            } else if !isAdjusting {
                 shape.velocity = velocity
             }
             shapes[index] = shape
@@ -387,22 +407,22 @@ struct HighContrastMobileView: View {
     }
 
     private func resolveShapeCollisions() {
-        guard shapes.count > 1 else { return }
-
         let now = Date()
         for i in 0..<(shapes.count - 1) {
             for j in (i + 1)..<shapes.count {
                 let a = shapes[i]
                 let b = shapes[j]
-                let aRadius = collisionRadius(for: a)
-                let bRadius = collisionRadius(for: b)
+                let polyA = worldContour(for: a)
+                let polyB = worldContour(for: b)
 
-                let dx = b.position.x - a.position.x
-                let dy = b.position.y - a.position.y
-                let distance = sqrt(dx * dx + dy * dy)
-                let minDistance = aRadius + bRadius
+                guard let collision = satCollision(polyA: polyA, polyB: polyB) else { continue }
 
-                guard distance < minDistance else { continue }
+                var normal = collision.normal
+                let centerDelta = CGPoint(x: b.position.x - a.position.x, y: b.position.y - a.position.y)
+                if dot(centerDelta, normal) < 0 {
+                    normal.x *= -1
+                    normal.y *= -1
+                }
 
                 let key = "\(min(a.id.uuidString, b.id.uuidString))-\(max(a.id.uuidString, b.id.uuidString))"
                 let shouldPlay: Bool
@@ -415,41 +435,25 @@ struct HighContrastMobileView: View {
                     lastCollisionTimes[key] = now
                 }
 
-                let nx: CGFloat
-                let ny: CGFloat
-                if distance > 0.001 {
-                    nx = dx / distance
-                    ny = dy / distance
-                } else {
-                    let angle = Double.random(in: 0..<(2 * .pi))
-                    nx = CGFloat(cos(angle))
-                    ny = CGFloat(sin(angle))
-                }
-
                 let isDraggedA = draggedShapeIndex == i
                 let isDraggedB = draggedShapeIndex == j
+                let isAdjustingA = adjustingShapeIndex == i
+                let isAdjustingB = adjustingShapeIndex == j
 
-                let massA = max(1, aRadius * aRadius)
-                let massB = max(1, bRadius * bRadius)
-                let invMassA: CGFloat = isDraggedA ? 0 : 1 / massA
-                let invMassB: CGFloat = isDraggedB ? 0 : 1 / massB
+                let massA = shapeArea(for: a)
+                let massB = shapeArea(for: b)
+                let invMassA: CGFloat = (isDraggedA || isAdjustingA) ? 0 : 1 / massA
+                let invMassB: CGFloat = (isDraggedB || isAdjustingB) ? 0 : 1 / massB
                 let totalInvMass = invMassA + invMassB
                 if totalInvMass == 0 { continue }
 
-                var va = isDraggedA ? dragVelocity : a.velocity
-                var vb = isDraggedB ? dragVelocity : b.velocity
-
-                let relativeVelocity = (vb.x - va.x) * nx + (vb.y - va.y) * ny
-                let overlap = minDistance - max(distance, 0.001)
-                let correctionPercent: CGFloat = 0.8
-                let correctionSlop: CGFloat = 0.5
-                let correctionMagnitude = max(overlap - correctionSlop, 0) / totalInvMass * correctionPercent
-                let correctionX = correctionMagnitude * nx
-                let correctionY = correctionMagnitude * ny
+                let correctionPercent: CGFloat = 0.9
+                let correctionMagnitude = collision.overlap / totalInvMass * correctionPercent
+                let correctionX = normal.x * correctionMagnitude
+                let correctionY = normal.y * correctionMagnitude
 
                 var newAPosition = a.position
                 var newBPosition = b.position
-
                 if invMassA > 0 {
                     newAPosition.x -= correctionX * invMassA
                     newAPosition.y -= correctionY * invMassA
@@ -459,24 +463,16 @@ struct HighContrastMobileView: View {
                     newBPosition.y += correctionY * invMassB
                 }
 
-                let postDx = newBPosition.x - newAPosition.x
-                let postDy = newBPosition.y - newAPosition.y
-                let postDistance = sqrt(postDx * postDx + postDy * postDy)
-                if (isDraggedA || isDraggedB), postDistance < minDistance {
-                    let remaining = minDistance - postDistance
-                    if isDraggedA {
-                        newAPosition.x -= nx * remaining
-                        newAPosition.y -= ny * remaining
-                    } else {
-                        newBPosition.x += nx * remaining
-                        newBPosition.y += ny * remaining
-                    }
-                }
+                var va = isDraggedA ? dragVelocity : a.velocity
+                var vb = isDraggedB ? dragVelocity : b.velocity
+                if isAdjustingA { va = .zero }
+                if isAdjustingB { vb = .zero }
 
+                let relativeVelocity = (vb.x - va.x) * normal.x + (vb.y - va.y) * normal.y
                 if relativeVelocity < 0 {
                     let impulse = -(1 + collisionRestitution) * relativeVelocity / totalInvMass
-                    let impulseX = impulse * nx
-                    let impulseY = impulse * ny
+                    let impulseX = impulse * normal.x
+                    let impulseY = impulse * normal.y
 
                     if invMassA > 0 {
                         va.x -= impulseX * invMassA
@@ -490,45 +486,44 @@ struct HighContrastMobileView: View {
 
                 shapes[i].position = newAPosition
                 shapes[j].position = newBPosition
-                if !isDraggedA {
+                if !isDraggedA && !isAdjustingA {
+                    clampVelocity(&va)
                     shapes[i].velocity = va
                 }
-                if !isDraggedB {
+                if !isDraggedB && !isAdjustingB {
+                    clampVelocity(&vb)
                     shapes[j].velocity = vb
                 }
 
                 if shouldPlay {
                     let impactSpeed = abs(relativeVelocity)
-                    playBounceChime(for: a.kind, velocity: impactSpeed)
-                    playBounceChime(for: b.kind, velocity: impactSpeed)
+                    playBounceChime(for: a, velocity: impactSpeed)
+                    playBounceChime(for: b, velocity: impactSpeed)
                 }
             }
         }
     }
 
-    private func playBounceChime(for kind: ShapeState.Kind, velocity: CGFloat) {
-        // Only play if moving fast enough
+    private func playBounceChime(for shape: ShapeState, velocity: CGFloat) {
         guard velocity > 20 else { return }
 
-        // Volume based on velocity
         let volume = min(1.0, Float(velocity) / 300.0)
-        chimePlayer.playChime(note: kind.midiNote, volume: volume)
+        let note = midiNote(for: shape)
+        chimePlayer.playChime(note: note, volume: volume)
     }
 
     private func enforceBaselineSpeeds() {
-        guard baselineSpeed > 0 else { return }
-
         for index in shapes.indices {
-            if draggedShapeIndex == index { continue }
+            if draggedShapeIndex == index || adjustingShapeIndex == index { continue }
 
             var shape = shapes[index]
-            let adjusted = enforceBaselineVelocity(shape.velocity)
+            let adjusted = enforceBaselineVelocity(shape.velocity, baselineSpeed: shape.baselineSpeed)
             shape.velocity = adjusted
             shapes[index] = shape
         }
     }
 
-    private func enforceBaselineVelocity(_ velocity: CGPoint) -> CGPoint {
+    private func enforceBaselineVelocity(_ velocity: CGPoint, baselineSpeed: CGFloat) -> CGPoint {
         guard baselineSpeed > 0 else { return velocity }
 
         let currentSpeed = sqrt(velocity.x * velocity.x + velocity.y * velocity.y)
@@ -554,87 +549,332 @@ struct HighContrastMobileView: View {
         }
     }
 
-    private func halfSize(for shape: ShapeState) -> CGSize {
+    private func shapeArea(for shape: ShapeState) -> CGFloat {
         let minDim = min(screenSize.width, screenSize.height)
-        let width = minDim * shape.baseSize.width * sizeMultiplier
-        let height = minDim * shape.baseSize.height * sizeMultiplier
-        return CGSize(width: width / 2, height: height / 2)
+        let width = minDim * shape.baseSize.width * shape.sizeScale
+        let height = minDim * shape.baseSize.height * shape.sizeScale
+        return max(1, width * height)
     }
 
-    private func collisionRadius(for shape: ShapeState) -> CGFloat {
+    private func sizeMetric(for shape: ShapeState) -> CGFloat {
         let minDim = min(screenSize.width, screenSize.height)
-        return minDim * max(shape.baseSize.width, shape.baseSize.height) * sizeMultiplier * 0.5
+        let width = minDim * shape.baseSize.width * shape.sizeScale
+        let height = minDim * shape.baseSize.height * shape.sizeScale
+        return max(width, height)
+    }
+
+    private func midiNote(for shape: ShapeState) -> UInt8 {
+        let minDim = min(screenSize.width, screenSize.height)
+        let minMetric = minDim * minBaseSize * minShapeScale
+        let maxMetric = minDim * maxBaseSize * maxShapeScale
+        let normalized = ((sizeMetric(for: shape) - minMetric) / max(maxMetric - minMetric, 1))
+            .clamped(to: 0...1)
+        let minNote: CGFloat = 60
+        let maxNote: CGFloat = 86
+        var note = maxNote - normalized * (maxNote - minNote)
+
+        let offset: CGFloat
+        switch shape.kind {
+        case .circle:
+            offset = 2
+        case .roundedRect:
+            offset = 0
+        case .capsule:
+            offset = -2
+        case .blob:
+            offset = 4
+        }
+
+        note = min(maxNote, max(minNote, note + offset))
+        return UInt8(note.rounded())
+    }
+
+    private func contourPoints(for kind: ShapeState.Kind, pointCount: Int) -> [CGPoint] {
+        let roundness: CGFloat
+        switch kind {
+        case .circle:
+            roundness = 2.0
+        case .roundedRect:
+            roundness = CGFloat.random(in: 4.0...5.5)
+        case .capsule:
+            roundness = CGFloat.random(in: 6.0...7.5)
+        case .blob:
+            roundness = CGFloat.random(in: 2.4...3.2)
+        }
+
+        var points: [CGPoint] = []
+        points.reserveCapacity(pointCount)
+
+        for i in 0..<pointCount {
+            let t = Double(i) / Double(pointCount) * 2 * Double.pi
+            let cosT = cos(t)
+            let sinT = sin(t)
+            let x = signPreservingPower(cosT, exponent: 2 / roundness) * 0.5
+            let y = signPreservingPower(sinT, exponent: 2 / roundness) * 0.5
+            points.append(CGPoint(x: x, y: y))
+        }
+
+        return points
+    }
+
+    private func worldContour(for shape: ShapeState, position: CGPoint? = nil) -> [CGPoint] {
+        let center = position ?? shape.position
+        let minDim = min(screenSize.width, screenSize.height)
+        let width = minDim * shape.baseSize.width * shape.sizeScale
+        let height = minDim * shape.baseSize.height * shape.sizeScale
+        let rotation = CGFloat(shape.rotation.radians)
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+
+        return shape.contour.map { point in
+            let local = CGPoint(x: point.x * width, y: point.y * height)
+            let rotated = CGPoint(
+                x: local.x * cosR - local.y * sinR,
+                y: local.x * sinR + local.y * cosR
+            )
+            return CGPoint(x: center.x + rotated.x, y: center.y + rotated.y)
+        }
+    }
+
+    private func polygonBounds(_ points: [CGPoint]) -> CGRect {
+        guard let first = points.first else { return .zero }
+        var minX = first.x
+        var maxX = first.x
+        var minY = first.y
+        var maxY = first.y
+
+        for point in points.dropFirst() {
+            minX = min(minX, point.x)
+            maxX = max(maxX, point.x)
+            minY = min(minY, point.y)
+            maxY = max(maxY, point.y)
+        }
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private func satCollision(polyA: [CGPoint], polyB: [CGPoint]) -> (normal: CGPoint, overlap: CGFloat)? {
+        var smallestOverlap = CGFloat.greatestFiniteMagnitude
+        var smallestAxis = CGPoint.zero
+
+        let axes = polygonAxes(polyA) + polygonAxes(polyB)
+        guard !axes.isEmpty else { return nil }
+        for axis in axes {
+            let projectionA = project(polyA, onto: axis)
+            let projectionB = project(polyB, onto: axis)
+            if projectionA.max < projectionB.min || projectionB.max < projectionA.min {
+                return nil
+            }
+            let overlap = min(projectionA.max, projectionB.max) - max(projectionA.min, projectionB.min)
+            if overlap < smallestOverlap {
+                smallestOverlap = overlap
+                smallestAxis = axis
+            }
+        }
+
+        return (normal: smallestAxis, overlap: smallestOverlap)
+    }
+
+    private func polygonAxes(_ points: [CGPoint]) -> [CGPoint] {
+        guard points.count >= 2 else { return [] }
+        var axes: [CGPoint] = []
+        axes.reserveCapacity(points.count)
+
+        for i in 0..<points.count {
+            let a = points[i]
+            let b = points[(i + 1) % points.count]
+            let edge = CGPoint(x: b.x - a.x, y: b.y - a.y)
+            let normal = normalize(CGPoint(x: -edge.y, y: edge.x))
+            if normal != .zero {
+                axes.append(normal)
+            }
+        }
+
+        return axes
+    }
+
+    private func project(_ points: [CGPoint], onto axis: CGPoint) -> (min: CGFloat, max: CGFloat) {
+        guard let first = points.first else { return (0, 0) }
+        var minValue = dot(first, axis)
+        var maxValue = minValue
+
+        for point in points.dropFirst() {
+            let value = dot(point, axis)
+            minValue = min(minValue, value)
+            maxValue = max(maxValue, value)
+        }
+
+        return (minValue, maxValue)
+    }
+
+    private func normalize(_ vector: CGPoint) -> CGPoint {
+        let length = sqrt(vector.x * vector.x + vector.y * vector.y)
+        guard length > 0.001 else { return .zero }
+        return CGPoint(x: vector.x / length, y: vector.y / length)
+    }
+
+    private func dot(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+        a.x * b.x + a.y * b.y
+    }
+
+    private func signPreservingPower(_ value: Double, exponent: CGFloat) -> CGFloat {
+        let sign: Double = value >= 0 ? 1 : -1
+        let magnitude = pow(abs(value), Double(exponent))
+        return CGFloat(sign * magnitude)
     }
 
     private func clampedPosition(for shape: ShapeState, proposed: CGPoint, in size: CGSize) -> CGPoint {
-        let half = halfSize(for: shape)
-        return CGPoint(
-            x: min(max(proposed.x, half.width), size.width - half.width),
-            y: min(max(proposed.y, half.height), size.height - half.height)
-        )
+        let points = worldContour(for: shape, position: proposed)
+        let bounds = polygonBounds(points)
+        var clamped = proposed
+
+        if bounds.minX < 0 {
+            clamped.x += -bounds.minX
+        } else if bounds.maxX > size.width {
+            clamped.x -= bounds.maxX - size.width
+        }
+
+        if bounds.minY < 0 {
+            clamped.y += -bounds.minY
+        } else if bounds.maxY > size.height {
+            clamped.y -= bounds.maxY - size.height
+        }
+
+        return clamped
+    }
+
+    private func hitTest(at point: CGPoint) -> Int? {
+        for (index, shape) in shapes.enumerated().reversed() {
+            let polygon = worldContour(for: shape)
+            if pointInPolygon(point, polygon: polygon) {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private func pointInPolygon(_ point: CGPoint, polygon: [CGPoint]) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var contains = false
+        var j = polygon.count - 1
+        for i in 0..<polygon.count {
+            let pi = polygon[i]
+            let pj = polygon[j]
+            if (pi.y > point.y) != (pj.y > point.y),
+               point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y + 0.0001) + pi.x {
+                contains.toggle()
+            }
+            j = i
+        }
+        return contains
     }
 
     // MARK: - Drawing
 
     private func draw(shape: ShapeState, in size: CGSize, context: inout GraphicsContext) {
-        let minDimension = min(size.width, size.height)
-        let width = minDimension * shape.baseSize.width * sizeMultiplier
-        let height = minDimension * shape.baseSize.height * sizeMultiplier
-
-        let rect = CGRect(x: -width / 2, y: -height / 2, width: width, height: height)
-        let path = path(for: shape.kind, in: rect)
-
-        var transform = CGAffineTransform.identity
-        transform = transform.translatedBy(x: shape.position.x, y: shape.position.y)
-        transform = transform.rotated(by: CGFloat(shape.rotation.radians))
-
-        let transformedPath = path.applying(transform)
-        context.fill(transformedPath, with: .color(.black))
-    }
-
-    private func path(for kind: ShapeState.Kind, in rect: CGRect) -> Path {
-        switch kind {
-        case .circle:
-            return Path(ellipseIn: rect)
-        case .roundedRect:
-            return Path(roundedRect: rect, cornerRadius: min(rect.width, rect.height) * 0.25)
-        case .capsule:
-            return Path(roundedRect: rect, cornerRadius: min(rect.width, rect.height) * 0.5)
-        case .blob:
-            return blobPath(in: rect)
-        }
-    }
-
-    private func blobPath(in rect: CGRect) -> Path {
-        let w = rect.width
-        let h = rect.height
-        let x = rect.minX
-        let y = rect.minY
+        let points = worldContour(for: shape)
+        guard let first = points.first else { return }
 
         var path = Path()
-        path.move(to: CGPoint(x: x + w * 0.5, y: y))
-        path.addCurve(
-            to: CGPoint(x: x + w, y: y + h * 0.4),
-            control1: CGPoint(x: x + w * 0.78, y: y + h * 0.02),
-            control2: CGPoint(x: x + w, y: y + h * 0.1)
-        )
-        path.addCurve(
-            to: CGPoint(x: x + w * 0.72, y: y + h),
-            control1: CGPoint(x: x + w, y: y + h * 0.75),
-            control2: CGPoint(x: x + w * 0.9, y: y + h)
-        )
-        path.addCurve(
-            to: CGPoint(x: x + w * 0.2, y: y + h * 0.88),
-            control1: CGPoint(x: x + w * 0.48, y: y + h),
-            control2: CGPoint(x: x + w * 0.3, y: y + h * 1.05)
-        )
-        path.addCurve(
-            to: CGPoint(x: x + w * 0.1, y: y + h * 0.35),
-            control1: CGPoint(x: x + w * 0.1, y: y + h * 0.8),
-            control2: CGPoint(x: x, y: y + h * 0.55)
-        )
+        path.move(to: first)
+        for point in points.dropFirst() {
+            path.addLine(to: point)
+        }
         path.closeSubpath()
-        return path
+        context.fill(path, with: .color(shape.color))
+    }
+}
+
+private struct TwoFingerGestureOverlay: UIViewRepresentable {
+    var onPanBegan: (CGPoint) -> Void
+    var onPanChanged: (CGPoint) -> Void
+    var onPanEnded: (CGPoint) -> Void
+    var onTap: (CGPoint) -> Void
+    var onDoubleTap: (CGPoint) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        panGesture.minimumNumberOfTouches = 2
+        panGesture.maximumNumberOfTouches = 2
+        panGesture.cancelsTouchesInView = false
+        panGesture.delegate = context.coordinator
+
+        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        singleTap.numberOfTouchesRequired = 2
+        singleTap.numberOfTapsRequired = 1
+        singleTap.cancelsTouchesInView = false
+        singleTap.delegate = context.coordinator
+
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTouchesRequired = 2
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.cancelsTouchesInView = false
+        doubleTap.delegate = context.coordinator
+
+        singleTap.require(toFail: doubleTap)
+
+        view.addGestureRecognizer(panGesture)
+        view.addGestureRecognizer(singleTap)
+        view.addGestureRecognizer(doubleTap)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let parent: TwoFingerGestureOverlay
+
+        init(_ parent: TwoFingerGestureOverlay) {
+            self.parent = parent
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            let location = recognizer.location(in: view)
+            let translation = recognizer.translation(in: view)
+            let translationPoint = CGPoint(x: translation.x, y: translation.y)
+
+            switch recognizer.state {
+            case .began:
+                parent.onPanBegan(location)
+            case .changed:
+                parent.onPanChanged(translationPoint)
+            case .ended, .cancelled, .failed:
+                let velocity = recognizer.velocity(in: view)
+                parent.onPanEnded(CGPoint(x: velocity.x, y: velocity.y))
+            default:
+                break
+            }
+        }
+
+        @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            parent.onTap(recognizer.location(in: view))
+        }
+
+        @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            parent.onDoubleTap(recognizer.location(in: view))
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        min(range.upperBound, max(range.lowerBound, self))
     }
 }
 
