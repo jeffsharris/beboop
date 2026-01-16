@@ -31,7 +31,7 @@ struct ModeSwitcherView: View {
         }
     }
 
-    @State private var activeMode: AppMode = .cozyCoos
+    @AppStorage("lastActiveMode") private var storedMode = AppMode.cozyCoos.rawValue
     @State private var isMenuPresented = false
 
     var body: some View {
@@ -99,7 +99,7 @@ struct ModeSwitcherView: View {
 
                 ForEach(AppMode.allCases) { mode in
                     Button {
-                        activeMode = mode
+                        storedMode = mode.rawValue
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isMenuPresented = false
                         }
@@ -132,6 +132,10 @@ struct ModeSwitcherView: View {
             .padding(24)
         }
         .transition(.opacity)
+    }
+
+    private var activeMode: AppMode {
+        AppMode(rawValue: storedMode) ?? .cozyCoos
     }
 }
 
