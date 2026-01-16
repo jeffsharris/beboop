@@ -34,15 +34,20 @@ for Voice Aurora so future changes stay aligned with the experience.
 - Playback is a separate `AVAudioEngine` chain fed with the FOA W channel:
   `playerNode -> gateMixer -> delay -> boost -> mainMixer`
 - Loud-first, controlled-fade strategy:
-  - `gateMixer.outputVolume` is driven by an echo gate (`echoGateThreshold`,
-    `echoGateAttack`, `echoGateRelease`).
+  - The echo gate only triggers on rising input energy and enforces a retrigger
+    cooldown (`echoTriggerRise`, `echoRetriggerInterval`) to prevent feedback
+    from re-arming the echo.
+  - Keep `echoRetriggerInterval` longer than `echoDelayTime` to avoid the speaker
+    echo re-triggering itself.
   - `AVAudioUnitDelay` provides repeat spacing (`echoDelayTime`) and decay (`echoFeedback`).
   - `echoBoostDb` keeps the first echo strong.
   - Ducking (`duckingStrength`, `duckingLevelScale`, `duckingResponse`) reduces echo
-    when live speech is hot to avoid feedback loops without killing the initial hit.
+    when live speech is hot. `duckingDelay` preserves the initial hit before ducking
+    engages.
 
 Tuning notes:
-- If feedback loops return, reduce `echoFeedback` or increase `duckingStrength`.
+- If feedback loops return, reduce `echoFeedback`, increase `echoRetriggerInterval`,
+  or raise `echoTriggerRise`.
 - If the first echo feels too soft, increase `echoBoostDb` or `echoWetMixBase`.
 - If repeats feel too dense, increase `echoDelayTime` and/or lower `echoFeedback`.
 

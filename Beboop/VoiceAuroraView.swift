@@ -305,19 +305,24 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
     private let echoGateThreshold: Float = 0.1
     private let echoGateAttack: Float = 0.75
-    private let echoGateRelease: Float = 0.84
+    private let echoGateRelease: Float = 0.8
     private let echoWetMixBase: Float = 85
     private let echoWetMixRange: Float = 15
     private let echoDelayTime: TimeInterval = 0.65
-    private let echoFeedback: Float = 30
+    private let echoFeedback: Float = 20
     private let echoLowPassCutoff: Float = 9000
     private let echoBoostDb: Float = 18
     private let duckingStrength: Float = 0.5
     private let duckingResponse: Float = 0.22
     private let duckingLevelScale: Float = 0.8
+    private let duckingDelay: CFTimeInterval = 0.12
+    private let echoTriggerRise: Float = 0.015
+    private let echoRetriggerInterval: CFTimeInterval = 0.8
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
     private var duckingLevel: Float = 1.0
+    private var lastCurvedLevel: Float = 0
+    private var lastEchoTriggerTime: CFTimeInterval = 0
 
     func startListening() {
         guard !isListening else { return }
@@ -518,14 +523,23 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                                    energy: sumW2,
                                                    level: normalizedLevel)
 
-        let targetEcho: Float = curvedLevel > echoGateThreshold ? 1.0 : 0.0
+        let now = CFAbsoluteTimeGetCurrent()
+        let levelRise = curvedLevel - lastCurvedLevel
+        let canTrigger = now - lastEchoTriggerTime > echoRetriggerInterval
+        let triggerEcho = curvedLevel > echoGateThreshold && levelRise > echoTriggerRise && canTrigger
+        if triggerEcho {
+            lastEchoTriggerTime = now
+        }
+
+        let targetEcho: Float = triggerEcho ? 1.0 : 0.0
         if targetEcho > echoMix {
             echoMix = echoMix * (1 - echoGateAttack) + targetEcho * echoGateAttack
         } else {
             echoMix = echoMix * echoGateRelease + targetEcho * (1 - echoGateRelease)
         }
 
-        let duckingTarget = 1.0 - min(duckingStrength, curvedLevel * duckingLevelScale)
+        let bypassDucking = now - lastEchoTriggerTime < duckingDelay
+        let duckingTarget = bypassDucking ? 1.0 : (1.0 - min(duckingStrength, curvedLevel * duckingLevelScale))
         duckingLevel = duckingLevel * (1 - duckingResponse) + duckingTarget * duckingResponse
 
         let duckedMix = echoMix * duckingLevel
@@ -549,6 +563,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             let nextY = self.sourcePoint.y * (1 - self.sourceSmoothing) + directionPoint.y * self.sourceSmoothing
             self.sourcePoint = CGPoint(x: nextX, y: nextY)
         }
+
+        lastCurvedLevel = curvedLevel
     }
 
     private func resolveDirectionPoint(sumXW: Float,
