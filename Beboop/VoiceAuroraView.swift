@@ -296,8 +296,13 @@ final class AuroraAudioProcessor: ObservableObject {
     private let echoGateRelease: Float = 0.88
     private let echoWetMixBase: Float = 85
     private let echoWetMixRange: Float = 15
+    private let echoFeedback: Float = 45
     private let echoBoostDb: Float = 18
+    private let duckingStrength: Float = 0.35
+    private let duckingResponse: Float = 0.18
+    private let duckingLevelScale: Float = 0.6
     private let sourceSmoothing: CGFloat = 0.15
+    private var duckingLevel: Float = 1.0
 
     func startListening() {
         guard !isListening else { return }
@@ -337,7 +342,7 @@ final class AuroraAudioProcessor: ObservableObject {
 
             let delay = AVAudioUnitDelay()
             delay.delayTime = 0.5
-            delay.feedback = 68
+            delay.feedback = echoFeedback
             delay.lowPassCutoff = 12000
             delay.wetDryMix = 50
 
@@ -425,6 +430,12 @@ final class AuroraAudioProcessor: ObservableObject {
             echoMix = echoMix * echoGateRelease + targetEcho * (1 - echoGateRelease)
         }
 
+        let duckingTarget = 1.0 - min(duckingStrength, curvedLevel * duckingLevelScale)
+        duckingLevel = duckingLevel * (1 - duckingResponse) + duckingTarget * duckingResponse
+
+        let duckedMix = echoMix * duckingLevel
+        let duckedGain = echoBoostDb * duckingLevel
+
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
@@ -439,8 +450,9 @@ final class AuroraAudioProcessor: ObservableObject {
             let nextY = self.sourcePoint.y * (1 - self.sourceSmoothing) + targetPoint.y * self.sourceSmoothing
             self.sourcePoint = CGPoint(x: nextX, y: nextY)
 
-            self.gateMixer?.outputVolume = self.echoMix
-            self.delayNode?.wetDryMix = self.echoWetMixBase + self.echoWetMixRange * self.echoMix
+            self.gateMixer?.outputVolume = duckedMix
+            self.delayNode?.wetDryMix = self.echoWetMixBase + self.echoWetMixRange * duckedMix
+            self.boostNode?.globalGain = duckedGain
         }
     }
 
