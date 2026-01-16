@@ -404,13 +404,17 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     private func configureAudioSession(_ session: AVAudioSession) throws {
-        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
-        try session.setMode(.voiceChat)
+        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker])
+        try session.setMode(.measurement)
+        if let inputs = session.availableInputs,
+           let builtInMic = inputs.first(where: { $0.portType == .builtInMic }) {
+            try session.setPreferredInput(builtInMic)
+        }
         try session.setActive(true)
 
         let usesReceiver = session.currentRoute.outputs.contains { $0.portType == .builtInReceiver }
         if usesReceiver {
-            // Voice chat mode can route to the receiver; force speaker so the echo is audible.
+            // Ensure the echo is audible during capture.
             try session.overrideOutputAudioPort(.speaker)
         }
     }
