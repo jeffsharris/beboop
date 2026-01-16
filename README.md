@@ -62,7 +62,15 @@ export FASTLANE_USER="jeff.s.harris@gmail.com"
 6) **Add TestFlight testers** in App Store Connect.
    - Internal groups can be set to auto-distribute new builds.
 
-After this, every push to `main` will build and upload a new TestFlight build.
+## Build Trigger Policy
+Pushes to `main` only trigger a TestFlight build when the commit message includes `[testflight]`.
+Manual builds are always available via **Actions → TestFlight → Run workflow**.
+
+Examples:
+- Normal push (no build): `git commit -m "Tweak UI spacing"`
+- Trigger build: `git commit -m "Add new sound [testflight]"`
+
+After this, pushes with the flag will build and upload a new TestFlight build.
 
 ## Fastlane
 - `bundle exec fastlane beta` builds and uploads a TestFlight build.
@@ -71,3 +79,9 @@ After this, every push to `main` will build and upload a new TestFlight build.
 ## Notes
 - `fastlane match appstore` only needs to run locally when you create or renew signing assets.
 - Update the version in `Beboop/Info.plist` when shipping meaningful milestones.
+
+## Troubleshooting
+- **Invalid bundle / missing executable**: ensure `CFBundleExecutable` exists in `Beboop/Info.plist`.
+- **Provisioning conflicts**: project must use manual signing (`CODE_SIGN_STYLE = Manual`).
+- **Token invalid/expired**: confirm `ASC_KEY_ID`, `ASC_ISSUER_ID`, and base64 `ASC_KEY_P8` match the same API key and your system time is correct.
+- **Ruby/Bundler errors in CI**: workflow pins Ruby 3.1 and Bundler 2.4.19 for Fastlane compatibility.
