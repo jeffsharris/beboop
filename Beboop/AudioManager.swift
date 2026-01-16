@@ -4,8 +4,7 @@ import UIKit
 final class AudioManager: NSObject, ObservableObject {
     private struct PlaybackChain {
         let player: AVAudioPlayerNode
-        let timePitchA: AVAudioUnitTimePitch
-        let timePitchB: AVAudioUnitTimePitch
+        let timePitch: AVAudioUnitTimePitch
         let mixer: AVAudioMixerNode
         let format: AVAudioFormat
     }
@@ -27,11 +26,32 @@ final class AudioManager: NSObject, ObservableObject {
     @Published var playbackSpeeds: [Int: Float] = [:]
     @Published var playbackLevels: [Int: Float] = [:]
 
-    // Speed limits
+    // Speed limits and allowed values
     static let minSpeed: Float = 0.1
     static let maxSpeed: Float = 10.0
     static let defaultSpeed: Float = 1.0
-    static let speedStep: Float = 0.05
+
+    // Allowed speed values:
+    // Slowdown: 1.0, 0.95, 0.90, 0.85, ... down to 0.10 (5% steps)
+    // Speedup: 1.0, 1.5, 2.0, 2.5, ... up to 10.0 (0.5x steps)
+    static let allowedSpeeds: [Float] = {
+        var speeds: [Float] = []
+        // Slowdown values: 0.10, 0.15, 0.20, ... 0.95
+        var slow: Float = 0.10
+        while slow < 1.0 {
+            speeds.append(slow)
+            slow += 0.05
+        }
+        // Normal speed
+        speeds.append(1.0)
+        // Speedup values: 1.5, 2.0, 2.5, ... 10.0
+        var fast: Float = 1.5
+        while fast <= 10.0 {
+            speeds.append(fast)
+            fast += 0.5
+        }
+        return speeds.sorted()
+    }()
 
     override init() {
         super.init()
@@ -246,16 +266,29 @@ final class AudioManager: NSObject, ObservableObject {
 
     func setPlaybackSpeed(for tileIndex: Int, speed: Float) {
         let clampedSpeed = min(max(speed, Self.minSpeed), Self.maxSpeed)
-        let steppedSpeed = (clampedSpeed / Self.speedStep).rounded() * Self.speedStep
-        let normalizedSpeed = min(max(steppedSpeed, Self.minSpeed), Self.maxSpeed)
-        playbackSpeeds[tileIndex] = normalizedSpeed
+        let snappedSpeed = Self.snapToAllowedSpeed(clampedSpeed)
+        playbackSpeeds[tileIndex] = snappedSpeed
 
         if let chain = playbackChains[tileIndex] {
             updateTimePitch(for: tileIndex, chain: chain)
         }
         if let fallback = fallbackPlayers[tileIndex], fallback.isPlaying {
-            fallback.rate = normalizedSpeed
+            fallback.rate = snappedSpeed
         }
+    }
+
+    /// Snaps a speed value to the nearest allowed speed threshold
+    private static func snapToAllowedSpeed(_ speed: Float) -> Float {
+        var closest = allowedSpeeds[0]
+        var smallestDiff = abs(speed - closest)
+        for allowed in allowedSpeeds {
+            let diff = abs(speed - allowed)
+            if diff < smallestDiff {
+                smallestDiff = diff
+                closest = allowed
+            }
+        }
+        return closest
     }
 
     func resetPlaybackSpeed(for tileIndex: Int) {
@@ -317,8 +350,7 @@ final class AudioManager: NSObject, ObservableObject {
         if let existing = playbackChains[tileIndex] {
             stopMetering(for: tileIndex, on: existing.mixer)
             engine.detach(existing.player)
-            engine.detach(existing.timePitchA)
-            engine.detach(existing.timePitchB)
+            engine.detach(existing.timePitch)
             engine.detach(existing.mixer)
             playbackChains[tileIndex] = nil
         }
@@ -329,23 +361,23 @@ final class AudioManager: NSObject, ObservableObject {
         }
 
         let player = AVAudioPlayerNode()
-        let timePitchA = AVAudioUnitTimePitch()
-        let timePitchB = AVAudioUnitTimePitch()
+        let timePitch = AVAudioUnitTimePitch()
         let mixer = AVAudioMixerNode()
 
         engine.attach(player)
-        engine.attach(timePitchA)
-        engine.attach(timePitchB)
+        engine.attach(timePitch)
         engine.attach(mixer)
 
-        engine.connect(player, to: timePitchA, format: format)
-        engine.connect(timePitchA, to: timePitchB, format: format)
-        engine.connect(timePitchB, to: mixer, format: format)
+        // Simple chain: player -> timePitch -> mixer -> mainMixer
+        // AVAudioUnitTimePitch handles time-stretching with pitch preservation
+        // (like podcast apps using SOLA/phase vocoder algorithms)
+        engine.connect(player, to: timePitch, format: format)
+        engine.connect(timePitch, to: mixer, format: format)
         engine.connect(mixer, to: engine.mainMixerNode, format: format)
 
         engine.prepare()
 
-        let chain = PlaybackChain(player: player, timePitchA: timePitchA, timePitchB: timePitchB, mixer: mixer, format: format)
+        let chain = PlaybackChain(player: player, timePitch: timePitch, mixer: mixer, format: format)
         playbackChains[tileIndex] = chain
         updateTimePitch(for: tileIndex, chain: chain)
 
@@ -382,29 +414,18 @@ final class AudioManager: NSObject, ObservableObject {
         }
     }
 
+    /// Updates the time-pitch unit for podcast-style time-stretching.
+    /// AVAudioUnitTimePitch uses a phase vocoder algorithm that preserves pitch
+    /// while changing playback speed - the same approach used by podcast apps.
+    /// Setting pitch to 0 keeps the original pitch; rate controls the speed.
     private func updateTimePitch(for tileIndex: Int, chain: PlaybackChain) {
         let speed = playbackSpeeds[tileIndex] ?? Self.defaultSpeed
-        let rateComponent = Float(sqrt(Double(speed)))
-        chain.timePitchA.rate = rateComponent
-        chain.timePitchB.rate = rateComponent
-        chain.timePitchB.pitch = pitchCents(for: speed)
+        chain.timePitch.rate = speed
+        chain.timePitch.pitch = 0  // Preserve original pitch
     }
 
     private func formatsMatch(_ lhs: AVAudioFormat, _ rhs: AVAudioFormat) -> Bool {
         lhs.sampleRate == rhs.sampleRate && lhs.channelCount == rhs.channelCount
-    }
-
-    private func pitchCents(for speed: Float) -> Float {
-        guard speed != 1.0 else { return 0 }
-        let octaves = log2(Double(speed))
-
-        if speed > 1.0 {
-            let boosted = Float(octaves * 1200.0 * 1.25)
-            return min(boosted, 2400)
-        } else {
-            let softened = Float(octaves * 1200.0 * 0.35)
-            return max(softened, -600)
-        }
     }
 
     // MARK: - Metering
