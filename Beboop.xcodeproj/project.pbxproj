@@ -14,6 +14,7 @@
 		C02990BD5B54FC8146DD49FC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA043C45623C35A53106429 /* ContentView.swift */; };
 		E6A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */; };
 		F2B3C4D5E6F7A8B9C0D1E2F3 /* HighContrastMobileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */; };
+		FA12BC34DE56F7890A1B2C3D /* VoiceAuroraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A1B2C3D4E5F60718293A4B /* VoiceAuroraView.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* AudioManager.swift */; };
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* SoundTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */; };
 /* End PBXBuildFile section */
@@ -30,6 +31,7 @@
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundTileView.swift; sourceTree = "<group>"; };
 		E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeSwitcherView.swift; sourceTree = "<group>"; };
 		F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighContrastMobileView.swift; sourceTree = "<group>"; };
+		F9A1B2C3D4E5F60718293A4B /* VoiceAuroraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAuroraView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -45,6 +47,7 @@
 				610918B689732B2C9B11B115 /* LaunchScreen.storyboard */,
 				E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */,
 				D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */,
+				F9A1B2C3D4E5F60718293A4B /* VoiceAuroraView.swift */,
 				646EC591E161AFBCFBAC7FB0 /* Resources */,
 			);
 			path = Beboop;
@@ -146,6 +149,7 @@
 				F2B3C4D5E6F7A8B9C0D1E2F3 /* HighContrastMobileView.swift in Sources */,
 				E6A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift in Sources */,
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* SoundTileView.swift in Sources */,
+				FA12BC34DE56F7890A1B2C3D /* VoiceAuroraView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
