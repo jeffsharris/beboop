@@ -4,6 +4,7 @@ struct ModeSwitcherView: View {
     private enum AppMode: String, CaseIterable, Identifiable {
         case cozyCoos
         case driftDoodles
+        case voiceAurora
 
         var id: String { rawValue }
 
@@ -13,6 +14,8 @@ struct ModeSwitcherView: View {
                 return "Cozy Coos"
             case .driftDoodles:
                 return "Drift Doodles"
+            case .voiceAurora:
+                return "Voice Aurora"
             }
         }
 
@@ -22,6 +25,8 @@ struct ModeSwitcherView: View {
                 return "waveform"
             case .driftDoodles:
                 return "circle.grid.2x2"
+            case .voiceAurora:
+                return "sparkles"
             }
         }
     }
@@ -48,6 +53,8 @@ struct ModeSwitcherView: View {
             ContentView()
         case .driftDoodles:
             HighContrastMobileView()
+        case .voiceAurora:
+            VoiceAuroraView()
         }
     }
 
