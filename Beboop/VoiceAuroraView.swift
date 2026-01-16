@@ -2,23 +2,32 @@ import SwiftUI
 import AVFoundation
 
 struct VoiceAuroraView: View {
-    private struct Ripple: Identifiable {
+    private enum Edge {
+        case left
+        case right
+        case top
+        case bottom
+    }
+
+    private struct Wave: Identifiable {
         let id = UUID()
-        let origin: CGPoint
+        let edge: Edge
+        let edgePosition: CGFloat
         let startTime: Double
         let amplitude: Double
         let pitch: Double
+        let phase: Double
     }
 
     @StateObject private var audioProcessor = AuroraAudioProcessor()
-    @State private var ripples: [Ripple] = []
+    @State private var waves: [Wave] = []
     @State private var lastUpdateTime: Date = Date()
-    @State private var lastRippleTime: Date = .distantPast
+    @State private var lastWaveTime: Date = .distantPast
 
-    private let rippleCooldown: TimeInterval = 0.18
-    private let rippleMinLevel: Double = 0.08
-    private let rippleMaxAge: Double = 2.8
-    private let rippleBaseSpeed: Double = 140
+    private let waveCooldown: TimeInterval = 0.16
+    private let waveMinLevel: Double = 0.08
+    private let waveMaxAge: Double = 2.9
+    private let waveBaseSpeed: Double = 170
 
     var body: some View {
         GeometryReader { geometry in
@@ -29,10 +38,10 @@ struct VoiceAuroraView: View {
                     let pitch = Double(audioProcessor.dominantPitch)
 
                     drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
-                    drawRipples(context: &context, size: size, time: currentTime)
+                    drawWaves(context: &context, size: size, time: currentTime)
                 }
                 .onChange(of: timeline.date) { _, newDate in
-                    updateRipples(at: newDate)
+                    updateWaves(at: newDate)
                 }
             }
             .ignoresSafeArea()
@@ -45,21 +54,50 @@ struct VoiceAuroraView: View {
         }
     }
 
-    private func updateRipples(at date: Date) {
+    private func updateWaves(at date: Date) {
         let currentTime = date.timeIntervalSinceReferenceDate
         let level = Double(audioProcessor.smoothedLevel)
         let pitch = Double(audioProcessor.dominantPitch)
         let source = audioProcessor.sourcePoint
 
-        if level > rippleMinLevel, date.timeIntervalSince(lastRippleTime) > rippleCooldown {
-            let amplitude = ((level - rippleMinLevel) / max(0.001, 1 - rippleMinLevel)).clamped(to: 0...1)
-            let ripple = Ripple(origin: source, startTime: currentTime, amplitude: amplitude, pitch: pitch)
-            ripples.append(ripple)
-            lastRippleTime = date
+        if level > waveMinLevel, date.timeIntervalSince(lastWaveTime) > waveCooldown {
+            let amplitude = ((level - waveMinLevel) / max(0.001, 1 - waveMinLevel)).clamped(to: 0...1)
+            let edge = nearestEdge(for: source)
+            let position = edgePosition(for: source, edge: edge)
+            let wave = Wave(edge: edge,
+                            edgePosition: position,
+                            startTime: currentTime,
+                            amplitude: amplitude,
+                            pitch: pitch,
+                            phase: Double.random(in: 0...(.pi * 2)))
+            waves.append(wave)
+            lastWaveTime = date
         }
 
-        ripples.removeAll { currentTime - $0.startTime > rippleMaxAge }
+        waves.removeAll { currentTime - $0.startTime > waveMaxAge }
         lastUpdateTime = date
+    }
+
+    private func nearestEdge(for point: CGPoint) -> Edge {
+        let left = point.x
+        let right = 1 - point.x
+        let top = point.y
+        let bottom = 1 - point.y
+        let minValue = min(left, right, top, bottom)
+
+        if minValue == left { return .left }
+        if minValue == right { return .right }
+        if minValue == top { return .top }
+        return .bottom
+    }
+
+    private func edgePosition(for point: CGPoint, edge: Edge) -> CGFloat {
+        switch edge {
+        case .left, .right:
+            return point.y.clamped(to: 0.05...0.95)
+        case .top, .bottom:
+            return point.x.clamped(to: 0.05...0.95)
+        }
     }
 
     private func drawWaterBackground(context: inout GraphicsContext,
@@ -86,38 +124,93 @@ struct VoiceAuroraView: View {
         )
     }
 
-    private func drawRipples(context: inout GraphicsContext, size: CGSize, time: Double) {
-        for ripple in ripples {
-            let age = time - ripple.startTime
+    private func drawWaves(context: inout GraphicsContext, size: CGSize, time: Double) {
+        for wave in waves {
+            let age = time - wave.startTime
             guard age >= 0 else { continue }
 
-            let progress = age / rippleMaxAge
-            let radius = rippleBaseSpeed * age + ripple.amplitude * 40
-            let intensity = (1 - progress).clamped(to: 0...1) * (0.25 + ripple.amplitude * 0.75)
+            let progress = age / waveMaxAge
+            let radius = waveBaseSpeed * age + wave.amplitude * 60
+            let intensity = (1 - progress).clamped(to: 0...1) * (0.25 + wave.amplitude * 0.75)
 
-            let hue = (0.58 - ripple.pitch * 0.35).clamped(to: 0...1)
-            let color = Color(hue: hue, saturation: 0.7, brightness: 0.95)
+            let hue = (0.6 - wave.pitch * 0.35).clamped(to: 0...1)
+            let baseColor = Color(hue: hue, saturation: 0.8, brightness: 0.95)
+            let accentColor = Color(hue: (hue + 0.08).truncatingRemainder(dividingBy: 1),
+                                    saturation: 0.7,
+                                    brightness: 1.0)
 
-            let origin = CGPoint(x: ripple.origin.x * size.width,
-                                 y: ripple.origin.y * size.height)
-            let rect = CGRect(
-                x: origin.x - radius,
-                y: origin.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            )
+            let points = wavePoints(for: wave, size: size, time: time, radius: radius)
+            guard points.count > 2 else { continue }
 
-            let lineWidth = 1.5 + ripple.amplitude * 4
-            var rippleContext = context
-            rippleContext.addFilter(.blur(radius: 3))
-            rippleContext.stroke(Path(ellipseIn: rect),
-                                 with: .color(color.opacity(intensity * 0.35)),
-                                 lineWidth: lineWidth + 4)
+            let lineWidth = 2.0 + wave.amplitude * 4
 
-            context.stroke(Path(ellipseIn: rect),
-                           with: .color(color.opacity(intensity)),
+            var path = Path()
+            path.move(to: points[0])
+            for point in points.dropFirst() {
+                path.addLine(to: point)
+            }
+
+            var glowContext = context
+            glowContext.addFilter(.blur(radius: 10))
+            glowContext.stroke(path,
+                               with: .color(baseColor.opacity(intensity * 0.35)),
+                               lineWidth: lineWidth + 10)
+
+            context.stroke(path,
+                           with: .color(baseColor.opacity(intensity * 0.65)),
+                           lineWidth: lineWidth + 2)
+
+            context.stroke(path,
+                           with: .color(accentColor.opacity(intensity)),
                            lineWidth: lineWidth)
         }
+    }
+
+    private func wavePoints(for wave: Wave, size: CGSize, time: Double, radius: Double) -> [CGPoint] {
+        let segments = 120
+        let chaos = 6.0 + wave.amplitude * 18.0
+        let band = radius + 40
+
+        let length: CGFloat
+        let center: CGFloat
+        switch wave.edge {
+        case .left, .right:
+            length = size.height
+            center = wave.edgePosition * size.height
+        case .top, .bottom:
+            length = size.width
+            center = wave.edgePosition * size.width
+        }
+
+        var points: [CGPoint] = []
+        points.reserveCapacity(segments + 1)
+
+        for i in 0...segments {
+            let t = Double(i) / Double(segments)
+            let tangent = CGFloat(t) * length
+            let delta = Double(tangent - center)
+
+            if abs(delta) > band { continue }
+
+            let base = max(0, radius * radius - delta * delta)
+            let radial = sqrt(base)
+            let noise = sin(delta * 0.08 + time * 1.2 + wave.phase) * chaos
+                + sin(delta * 0.18 + time * 0.7 + wave.phase * 0.7) * (chaos * 0.4)
+            let displaced = max(0, radial + noise)
+
+            switch wave.edge {
+            case .left:
+                points.append(CGPoint(x: displaced, y: tangent))
+            case .right:
+                points.append(CGPoint(x: size.width - displaced, y: tangent))
+            case .top:
+                points.append(CGPoint(x: tangent, y: displaced))
+            case .bottom:
+                points.append(CGPoint(x: tangent, y: size.height - displaced))
+            }
+        }
+
+        return points
     }
 }
 
@@ -139,7 +232,7 @@ final class AuroraAudioProcessor: ObservableObject {
     private var isBuiltInMic = true
 
     private let echoGateThreshold: Float = 0.09
-    private let echoGateRelease: Float = 0.9
+    private let echoGateRelease: Float = 0.88
     private let sourceSmoothing: CGFloat = 0.15
 
     func startListening() {
@@ -179,10 +272,10 @@ final class AuroraAudioProcessor: ObservableObject {
             gateMixer.outputVolume = 0
 
             let delay = AVAudioUnitDelay()
-            delay.delayTime = 0.24
-            delay.feedback = 36
-            delay.lowPassCutoff = 9000
-            delay.wetDryMix = 35
+            delay.delayTime = 0.5
+            delay.feedback = 68
+            delay.lowPassCutoff = 12000
+            delay.wetDryMix = 50
 
             engine.attach(gateMixer)
             engine.attach(delay)
@@ -261,7 +354,7 @@ final class AuroraAudioProcessor: ObservableObject {
             self.sourcePoint = CGPoint(x: nextX, y: nextY)
 
             self.gateMixer?.outputVolume = self.echoMix
-            self.delayNode?.wetDryMix = 28 + 32 * self.echoMix
+            self.delayNode?.wetDryMix = 45 + 35 * self.echoMix
         }
     }
 
