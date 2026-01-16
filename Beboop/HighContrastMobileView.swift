@@ -53,7 +53,7 @@ struct HighContrastMobileView: View {
     private let maxSpeed: CGFloat = 3.0
     private let minSize: CGFloat = 0.5
     private let maxSize: CGFloat = 2.0
-    private let minBaselineSpeed: CGFloat = 0.2
+    private let minBaselineSpeed: CGFloat = 0.0
     private let maxBaselineSpeed: CGFloat = 2.5
 
     // Physics
@@ -178,7 +178,7 @@ struct HighContrastMobileView: View {
                 }
 
                 let adjustedSpeed = sqrt(newVelocity.x * newVelocity.x + newVelocity.y * newVelocity.y)
-                if adjustedSpeed < baselineSpeed {
+                if baselineSpeed > 0, adjustedSpeed < baselineSpeed {
                     let scale = baselineSpeed / max(adjustedSpeed, 0.01)
                     newVelocity.x *= scale
                     newVelocity.y *= scale
@@ -288,7 +288,7 @@ struct HighContrastMobileView: View {
             shape.velocity.y *= damping
 
             let currentSpeed = sqrt(shape.velocity.x * shape.velocity.x + shape.velocity.y * shape.velocity.y)
-            if currentSpeed < baselineSpeed {
+            if baselineSpeed > 0, currentSpeed < baselineSpeed {
                 let target = baselineSpeed
                 if currentSpeed > 0.01 {
                     let scale = target / currentSpeed
