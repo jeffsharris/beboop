@@ -491,6 +491,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
 
         var sumW2: Float = 0
+        var sumX2: Float = 0
+        var sumY2: Float = 0
+        var sumZ2: Float = 0
         var sumXW: Float = 0
         var sumYW: Float = 0
         var sumZW: Float = 0
@@ -506,6 +509,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             playbackData[i] = w
 
             sumW2 += w * w
+            sumX2 += x * x
+            sumY2 += y * y
+            sumZ2 += z * z
             sumXW += x * w
             sumYW += y * w
             sumZW += z * w
@@ -521,8 +527,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         playbackBuffer.frameLength = frameCount
         enqueuePlayback(playbackBuffer)
 
-        let rms = sqrt(sumW2 / Float(frames))
-        let normalizedLevel = min(1.0, rms * 8.0)
+        let rmsW = sqrt(sumW2 / Float(frames))
+        let rmsX = sqrt(sumX2 / Float(frames))
+        let rmsY = sqrt(sumY2 / Float(frames))
+        let rmsZ = sqrt(sumZ2 / Float(frames))
+        let normalizedLevel = min(1.0, rmsW * 8.0)
         let curvedLevel = pow(normalizedLevel, 0.7)
 
         let estimatedFreq = (Double(zeroCrossings) / 2.0) * sampleRate / Double(frames)
@@ -570,11 +579,15 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             if now - self.lastDebugUpdate > self.debugUpdateInterval {
                 let azimuthDegrees = Double(direction.azimuth * 180 / .pi)
                 let elevationDegrees = Double(direction.elevation * 180 / .pi)
-                self.debugText = String(format: "ch:%d  sr:%.0f  lvl:%.2f  conf:%.2f  az:%.0fdeg  el:%.0fdeg  x:%.2f  y:%.2f",
+                self.debugText = String(format: "ch:%d  sr:%.0f  lvl:%.2f  conf:%.2f  w:%.3f  x:%.3f  y:%.3f  z:%.3f\naz:%.0fdeg  el:%.0fdeg  x:%.2f  y:%.2f",
                                         channelCount,
                                         sampleRate,
                                         Double(normalizedLevel),
                                         Double(direction.confidence),
+                                        Double(rmsW),
+                                        Double(rmsX),
+                                        Double(rmsY),
+                                        Double(rmsZ),
                                         azimuthDegrees,
                                         elevationDegrees,
                                         Double(self.sourcePoint.x),
