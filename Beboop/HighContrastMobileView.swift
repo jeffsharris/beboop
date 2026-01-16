@@ -56,15 +56,12 @@ struct HighContrastMobileView: View {
         let wrappedX = (rawX + width).truncatingRemainder(dividingBy: travelDistance) - width
         let y = shape.start.y * size.height
 
-        context.saveGState()
-        context.translateBy(x: wrappedX, y: y)
-        context.rotate(by: shape.rotation)
-
         let rect = CGRect(x: -width / 2, y: -height / 2, width: width, height: height)
         let path = path(for: shape.kind, in: rect)
-        context.fill(path, with: .color(.black))
-
-        context.restoreGState()
+        let transform = CGAffineTransform(translationX: wrappedX, y: y)
+            .rotated(by: CGFloat(shape.rotation.radians))
+        let transformedPath = path.applying(transform)
+        context.fill(transformedPath, with: .color(.black))
     }
 
     private func path(for kind: MovingShape.Kind, in rect: CGRect) -> Path {
