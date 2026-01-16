@@ -225,7 +225,7 @@ struct HighContrastMobileView: View {
             y: sin(angle) * baselineSpeed
         )
         let rotation = Angle.degrees(Double.random(in: -18...18))
-        let color = randomColor()
+        let color = Color.black
         let contour = contourPoints(for: kind, pointCount: contourPointCount)
         let initialPosition = position ?? randomPosition(for: baseSize, sizeScale: sizeScale, in: size)
         var shape = ShapeState(
@@ -280,12 +280,6 @@ struct HighContrastMobileView: View {
         return CGPoint(x: x, y: y)
     }
 
-    private func randomColor() -> Color {
-        let hue = Double.random(in: 0...1)
-        let saturation = Double.random(in: 0.45...0.75)
-        let brightness = Double.random(in: 0.75...0.95)
-        return Color(hue: hue, saturation: saturation, brightness: brightness)
-    }
 
     private func updateShapesForResize(from oldSize: CGSize, to newSize: CGSize) {
         guard oldSize.width > 1, oldSize.height > 1 else { return }
@@ -797,7 +791,7 @@ private struct TwoFingerGestureOverlay: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+        let view = PassthroughTwoFingerView()
         view.backgroundColor = .clear
 
         let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
@@ -869,6 +863,15 @@ private struct TwoFingerGestureOverlay: UIViewRepresentable {
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             true
         }
+    }
+}
+
+private final class PassthroughTwoFingerView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let touches = event?.allTouches, touches.count >= 2 else {
+            return nil
+        }
+        return super.hitTest(point, with: event)
     }
 }
 
