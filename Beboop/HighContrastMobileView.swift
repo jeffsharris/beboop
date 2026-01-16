@@ -874,7 +874,7 @@ private struct TwoFingerGestureOverlay: UIViewRepresentable {
 
 private extension CGFloat {
     func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
-        min(range.upperBound, max(range.lowerBound, self))
+        Swift.min(range.upperBound, Swift.max(range.lowerBound, self))
     }
 }
 
