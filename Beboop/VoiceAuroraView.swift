@@ -363,11 +363,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
     private func startSpatialCapture() {
         do {
-            let session = AVAudioSession.sharedInstance()
-            try configureAudioSession(session)
-
             let sessionCapture = AVCaptureSession()
-            sessionCapture.automaticallyConfiguresApplicationAudioSession = false
+            sessionCapture.usesApplicationAudioSession = true
+            sessionCapture.automaticallyConfiguresApplicationAudioSession = true
             sessionCapture.beginConfiguration()
 
             guard let device = AVCaptureDevice.default(for: .audio) else {
@@ -399,24 +397,25 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             captureInput = input
             captureOutput = output
             isListening = true
+
+            applyPlaybackOverrides()
         } catch {
             print("Aurora audio setup failed: \(error)")
         }
     }
 
-    private func configureAudioSession(_ session: AVAudioSession) throws {
-        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker])
-        try session.setMode(.measurement)
-        if let inputs = session.availableInputs,
-           let builtInMic = inputs.first(where: { $0.portType == .builtInMic }) {
-            try session.setPreferredInput(builtInMic)
+    private func applyPlaybackOverrides() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setPreferredInputNumberOfChannels(4)
+        } catch {
+            print("Failed to set preferred input channels: \(error)")
         }
-        try session.setActive(true)
 
-        let usesReceiver = session.currentRoute.outputs.contains { $0.portType == .builtInReceiver }
-        if usesReceiver {
-            // Ensure the echo is audible during capture.
+        do {
             try session.overrideOutputAudioPort(.speaker)
+        } catch {
+            print("Failed to override audio output: \(error)")
         }
     }
 
@@ -798,7 +797,13 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
         let bytesPerFrame = asbd.mBytesPerFrame
         let interleaving = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 ? "non-int" : "int"
         let floatFlag = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0 ? "float" : "int"
-        let info = "fmt:\(formatID) \(floatFlag) \(interleaving) bits:\(bits) bpf:\(bytesPerFrame) flags:\(flags)"
+        let session = AVAudioSession.sharedInstance()
+        let maxInput = session.maximumInputNumberOfChannels
+        let preferredInput = session.preferredInputNumberOfChannels
+        let category = session.category
+        let mode = session.mode
+        let inputPort = session.currentRoute.inputs.first?.portType.rawValue ?? "unknown"
+        let info = "fmt:\(formatID) \(floatFlag) \(interleaving) bits:\(bits) bpf:\(bytesPerFrame) flags:\(flags)\nroute:\(inputPort) maxIn:\(maxInput) prefIn:\(preferredInput) cat:\(category) mode:\(mode)"
         if info != lastFormatInfo {
             lastFormatInfo = info
         }
