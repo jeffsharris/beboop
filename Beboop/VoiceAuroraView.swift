@@ -290,7 +290,7 @@ final class AuroraAudioProcessor: ObservableObject {
     private var echoMix: Float = 0
     private var isBuiltInMic = true
 
-    private let echoGateThreshold: Float = 0.09
+    private let echoGateThreshold: Float = 0.1
     private let echoGateRelease: Float = 0.88
     private let sourceSmoothing: CGFloat = 0.15
 
@@ -318,9 +318,7 @@ final class AuroraAudioProcessor: ObservableObject {
     private func setupAudioEngine() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
-            try session.setMode(.voiceChat)
-            try session.setActive(true)
+            try configureAudioSession(session)
 
             isBuiltInMic = session.currentRoute.inputs.contains { $0.portType == .builtInMic }
 
@@ -356,6 +354,18 @@ final class AuroraAudioProcessor: ObservableObject {
             self.isListening = true
         } catch {
             print("Aurora audio setup failed: \(error)")
+        }
+    }
+
+    private func configureAudioSession(_ session: AVAudioSession) throws {
+        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
+        try session.setMode(.voiceChat)
+        try session.setActive(true)
+
+        let usesReceiver = session.currentRoute.outputs.contains { $0.portType == .builtInReceiver }
+        if usesReceiver {
+            // Voice chat mode can route to the receiver; force speaker so the echo is audible.
+            try session.overrideOutputAudioPort(.speaker)
         }
     }
 
@@ -396,7 +406,7 @@ final class AuroraAudioProcessor: ObservableObject {
         let logFreq = log2(estimatedFreq / 100.0) / 3.3
         let normalizedPitch = Float(min(1.0, max(0.0, logFreq)))
 
-        let targetEcho: Float = normalizedLevel > echoGateThreshold ? 1.0 : 0.0
+        let targetEcho: Float = curvedLevel > echoGateThreshold ? 1.0 : 0.0
         echoMix = echoMix * echoGateRelease + targetEcho * (1 - echoGateRelease)
 
         DispatchQueue.main.async { [weak self] in
