@@ -7,6 +7,27 @@ Tiny SwiftUI toy app that plays a quick boop sound. The repo is wired for a push
 - Set your signing team when prompted.
 - Run on device or simulator.
 
+## Local Fastlane (Optional)
+`bundle exec fastlane beta` builds and uploads to TestFlight, so it needs the same App Store Connect API values as CI.
+
+One-time local setup:
+```sh
+gem install bundler -v 2.4.19 --user-install
+export PATH="$(ruby -e 'print Gem.user_dir')/bin:$PATH"
+bundle _2.4.19_ install
+```
+
+Per-session env vars:
+```sh
+export ASC_KEY_ID="..."
+export ASC_ISSUER_ID="..."
+export ASC_KEY_P8="$(base64 -i /path/to/AuthKey_XXXX.p8 | tr -d '\n')"
+export MATCH_GIT_URL="git@github.com:jeffsharris/beboop-certificates.git"
+export MATCH_PASSWORD="..."
+export TEAM_ID="YS8CD5VJH4"
+export FASTLANE_USER="jeff.s.harris@gmail.com"
+```
+
 ## One-Time CI Setup (TestFlight)
 1) **Create the app in App Store Connect**
    - Bundle ID: `com.jeffharris.beboop`
@@ -18,6 +39,7 @@ Tiny SwiftUI toy app that plays a quick boop sound. The repo is wired for a push
 
 3) **Create a private certificates repo for Match**
    - Example: `beboop-certificates`
+   - This repo only stores encrypted signing assets (no API keys or secrets).
 
 4) **Initialize signing assets locally**
    ```sh
@@ -31,12 +53,14 @@ Tiny SwiftUI toy app that plays a quick boop sound. The repo is wired for a push
    - `ASC_KEY_P8`: base64 of the `.p8` file
      - Example: `base64 -i AuthKey_XXXX.p8 | pbcopy`
    - `MATCH_GIT_URL`: HTTPS or SSH URL of the certs repo
-   - `MATCH_PASSWORD`: encryption passphrase for Match
-   - `TEAM_ID`: your Apple Developer Team ID
-   - `FASTLANE_USER`: your Apple ID email (used for Match setup)
-   - `ITC_TEAM_ID`: optional, only if you belong to multiple App Store Connect teams
+    - `MATCH_GIT_PRIVATE_KEY`: deploy key private key for the certs repo
+    - `MATCH_PASSWORD`: encryption passphrase for Match
+    - `TEAM_ID`: your Apple Developer Team ID
+    - `FASTLANE_USER`: your Apple ID email (used for Match setup)
+    - `ITC_TEAM_ID`: optional, only if you belong to multiple App Store Connect teams
 
 6) **Add TestFlight testers** in App Store Connect.
+   - Internal groups can be set to auto-distribute new builds.
 
 After this, every push to `main` will build and upload a new TestFlight build.
 
