@@ -24,4 +24,4 @@ For major changes, propose a plan before coding. Ask for confirmation before add
 
 ## Agent Notes
 - When adding new Swift files, register them in `Beboop.xcodeproj/project.pbxproj` (group + Sources build phase). If you only add the file on disk, CI builds will fail with missing symbol/compile errors.
-- When asked to tag a build for TestFlight, use a `testflight-YYYYMMDD-HHMM` tag (no spaces) and include `[testflight]` in the commit message to trigger CI. If the user says something like "test flight", "testflight", "test-flite", or similar dictation/misspellings, assume they mean TestFlight and tag accordingly.
+- Only tag for TestFlight when the user explicitly asks to tag/push for TestFlight. If they do ask, use a `testflight-YYYYMMDD-HHMM` tag (no spaces) and include `[testflight]` in the commit message to trigger CI. If the user says something like "test flight", "testflight", "test-flite", or similar, treat that as an explicit TestFlight request. Otherwise, do not tag.
