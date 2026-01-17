@@ -27,6 +27,8 @@ for Voice Aurora so future changes stay aligned with the experience.
   - `phase` for organic wobble
 - The wave band is drawn as a noisy ring segment and then composited with multiple
   gradient stops to keep overlaps luminous (screen blend + blur for glow).
+- A live "Echo Tuning" panel is available in the Voice Aurora UI (slider icon at
+  bottom-left). Use it to adjust echo parameters on-device while listening.
 
 ## Echo audio chain (AuroraAudioProcessor)
 

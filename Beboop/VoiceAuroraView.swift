@@ -25,6 +25,7 @@ struct VoiceAuroraView: View {
     @State private var waves: [Wave] = []
     @State private var lastUpdateTime: Date = Date()
     @State private var lastWaveTime: Date = .distantPast
+    @State private var isTuningPresented = false
 
     private let waveCooldown: TimeInterval = 0.16
     private let waveMinLevel: Double = 0.08
@@ -33,20 +34,31 @@ struct VoiceAuroraView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(.animation) { timeline in
-                Canvas { context, size in
-                    let currentTime = timeline.date.timeIntervalSinceReferenceDate
-                    let level = Double(audioProcessor.smoothedLevel)
-                    let pitch = Double(audioProcessor.dominantPitch)
+            let bottomInset = max(16, geometry.safeAreaInsets.bottom + 8)
+            let panelMaxHeight = min(geometry.size.height * 0.6, 520)
 
-                    drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
-                    drawWaves(context: &context, size: size, time: currentTime)
+            ZStack {
+                TimelineView(.animation) { timeline in
+                    Canvas { context, size in
+                        let currentTime = timeline.date.timeIntervalSinceReferenceDate
+                        let level = Double(audioProcessor.smoothedLevel)
+                        let pitch = Double(audioProcessor.dominantPitch)
+
+                        drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
+                        drawWaves(context: &context, size: size, time: currentTime)
+                    }
+                    .onChange(of: timeline.date) { _, newDate in
+                        updateWaves(at: newDate)
+                    }
                 }
-                .onChange(of: timeline.date) { _, newDate in
-                    updateWaves(at: newDate)
+                .ignoresSafeArea()
+
+                tuningButton(bottomInset: bottomInset)
+
+                if isTuningPresented {
+                    tuningPanel(bottomInset: bottomInset, maxHeight: panelMaxHeight)
                 }
             }
-            .ignoresSafeArea()
         }
         .onAppear {
             audioProcessor.startListening()
@@ -273,14 +285,266 @@ struct VoiceAuroraView: View {
         path.closeSubpath()
         return path
     }
+
+    private func tuningButton(bottomInset: CGFloat) -> some View {
+        VStack {
+            Spacer()
+            HStack {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isTuningPresented.toggle()
+                    }
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 4)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 18)
+                .padding(.bottom, bottomInset)
+                Spacer()
+            }
+        }
+    }
+
+    private func tuningPanel(bottomInset: CGFloat, maxHeight: CGFloat) -> some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Echo Tuning")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isTuningPresented = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        sliderSectionHeader("Gate")
+                        sliderRow(title: "Gate Threshold",
+                                  value: floatBinding(\.echoGateThreshold),
+                                  range: 0.02...0.3,
+                                  step: 0.01,
+                                  format: "%.2f")
+                        sliderRow(title: "Gate Attack",
+                                  value: floatBinding(\.echoGateAttack),
+                                  range: 0.2...0.95,
+                                  step: 0.01,
+                                  format: "%.2f")
+                        sliderRow(title: "Gate Release",
+                                  value: floatBinding(\.echoGateRelease),
+                                  range: 0.6...0.98,
+                                  step: 0.01,
+                                  format: "%.2f")
+
+                        sliderSectionHeader("Trigger")
+                        sliderRow(title: "Trigger Rise",
+                                  value: floatBinding(\.echoTriggerRise),
+                                  range: 0.0...0.08,
+                                  step: 0.005,
+                                  format: "%.3f")
+                        sliderRow(title: "Retrigger Interval",
+                                  value: doubleBinding(\.echoRetriggerInterval),
+                                  range: 0.3...2.0,
+                                  step: 0.05,
+                                  format: "%.2f",
+                                  suffix: "s")
+                        sliderRow(title: "Hold Duration",
+                                  value: doubleBinding(\.echoHoldDuration),
+                                  range: 0.1...1.2,
+                                  step: 0.05,
+                                  format: "%.2f",
+                                  suffix: "s")
+
+                        sliderSectionHeader("Delay")
+                        sliderRow(title: "Delay Time",
+                                  value: doubleBinding(\.echoDelayTime),
+                                  range: 0.2...1.2,
+                                  step: 0.05,
+                                  format: "%.2f",
+                                  suffix: "s")
+                        sliderRow(title: "Feedback",
+                                  value: floatBinding(\.echoFeedback),
+                                  range: 0...70,
+                                  step: 1,
+                                  format: "%.0f")
+                        sliderRow(title: "Wet Base",
+                                  value: floatBinding(\.echoWetMixBase),
+                                  range: 0...100,
+                                  step: 1,
+                                  format: "%.0f")
+                        sliderRow(title: "Wet Range",
+                                  value: floatBinding(\.echoWetMixRange),
+                                  range: 0...100,
+                                  step: 1,
+                                  format: "%.0f")
+
+                        sliderSectionHeader("Tone")
+                        sliderRow(title: "Low-pass",
+                                  value: floatBinding(\.echoLowPassCutoff),
+                                  range: 4000...16000,
+                                  step: 100,
+                                  format: "%.0f",
+                                  suffix: "Hz")
+                        sliderRow(title: "Boost",
+                                  value: floatBinding(\.echoBoostDb),
+                                  range: 0...24,
+                                  step: 0.5,
+                                  format: "%.1f",
+                                  suffix: "dB")
+
+                        sliderSectionHeader("Ducking")
+                        sliderRow(title: "Strength",
+                                  value: floatBinding(\.duckingStrength),
+                                  range: 0...0.9,
+                                  step: 0.05,
+                                  format: "%.2f")
+                        sliderRow(title: "Response",
+                                  value: floatBinding(\.duckingResponse),
+                                  range: 0.05...0.6,
+                                  step: 0.01,
+                                  format: "%.2f")
+                        sliderRow(title: "Level Scale",
+                                  value: floatBinding(\.duckingLevelScale),
+                                  range: 0...1.5,
+                                  step: 0.05,
+                                  format: "%.2f")
+                        sliderRow(title: "Ducking Delay",
+                                  value: doubleBinding(\.duckingDelay),
+                                  range: 0...0.4,
+                                  step: 0.02,
+                                  format: "%.2f",
+                                  suffix: "s")
+                    }
+                    .padding(.vertical, 8)
+                }
+                .frame(maxHeight: maxHeight)
+
+                Button {
+                    audioProcessor.resetEchoDefaults()
+                } label: {
+                    Text("Reset Defaults")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.white.opacity(0.6))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, bottomInset)
+            .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func sliderRow(title: String,
+                           value: Binding<Double>,
+                           range: ClosedRange<Double>,
+                           step: Double,
+                           format: String,
+                           suffix: String = "") -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.primary)
+                Spacer()
+                Text(String(format: format, value.wrappedValue) + suffix)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            Slider(value: value, in: range, step: step)
+        }
+    }
+
+    private func sliderSectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.semibold))
+            .foregroundColor(.secondary)
+            .padding(.top, 6)
+    }
+
+    private func floatBinding(_ keyPath: ReferenceWritableKeyPath<AuroraAudioProcessor, Float>) -> Binding<Double> {
+        Binding(
+            get: { Double(audioProcessor[keyPath: keyPath]) },
+            set: { audioProcessor[keyPath: keyPath] = Float($0) }
+        )
+    }
+
+    private func doubleBinding(_ keyPath: ReferenceWritableKeyPath<AuroraAudioProcessor, Double>) -> Binding<Double> {
+        Binding(
+            get: { audioProcessor[keyPath: keyPath] },
+            set: { audioProcessor[keyPath: keyPath] = $0 }
+        )
+    }
 }
 
 // MARK: - Audio Processor
 
 final class AuroraAudioProcessor: NSObject, ObservableObject {
+    private enum EchoDefaults {
+        static let gateThreshold: Float = 0.1
+        static let gateAttack: Float = 0.75
+        static let gateRelease: Float = 0.8
+        static let wetMixBase: Float = 85
+        static let wetMixRange: Float = 15
+        static let delayTime: Double = 0.7
+        static let feedback: Float = 18
+        static let lowPassCutoff: Float = 9000
+        static let boostDb: Float = 18
+        static let duckingStrength: Float = 0.65
+        static let duckingResponse: Float = 0.22
+        static let duckingLevelScale: Float = 0.8
+        static let duckingDelay: Double = 0.12
+        static let triggerRise: Float = 0.02
+        static let retriggerInterval: Double = 1.0
+        static let holdDuration: Double = 0.55
+    }
+
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
     @Published var sourcePoint: CGPoint = CGPoint(x: 0.5, y: 0.9)
+    @Published var echoGateThreshold: Float = EchoDefaults.gateThreshold
+    @Published var echoGateAttack: Float = EchoDefaults.gateAttack
+    @Published var echoGateRelease: Float = EchoDefaults.gateRelease
+    @Published var echoWetMixBase: Float = EchoDefaults.wetMixBase
+    @Published var echoWetMixRange: Float = EchoDefaults.wetMixRange
+    @Published var echoDelayTime: Double = EchoDefaults.delayTime
+    @Published var echoFeedback: Float = EchoDefaults.feedback
+    @Published var echoLowPassCutoff: Float = EchoDefaults.lowPassCutoff
+    @Published var echoBoostDb: Float = EchoDefaults.boostDb
+    @Published var duckingStrength: Float = EchoDefaults.duckingStrength
+    @Published var duckingResponse: Float = EchoDefaults.duckingResponse
+    @Published var duckingLevelScale: Float = EchoDefaults.duckingLevelScale
+    @Published var duckingDelay: Double = EchoDefaults.duckingDelay
+    @Published var echoTriggerRise: Float = EchoDefaults.triggerRise
+    @Published var echoRetriggerInterval: Double = EchoDefaults.retriggerInterval
+    @Published var echoHoldDuration: Double = EchoDefaults.holdDuration
 
     private let captureQueue = DispatchQueue(label: "VoiceAurora.Capture")
     private let foaLayoutTag: AudioChannelLayoutTag = AudioChannelLayoutTag(kAudioChannelLayoutTag_HOA_ACN_SN3D | 4)
@@ -303,27 +567,30 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var echoMix: Float = 0
     private var lastDirectionPoint = CGPoint(x: 0.5, y: 0.85)
 
-    private let echoGateThreshold: Float = 0.1
-    private let echoGateAttack: Float = 0.75
-    private let echoGateRelease: Float = 0.8
-    private let echoWetMixBase: Float = 85
-    private let echoWetMixRange: Float = 15
-    private let echoDelayTime: TimeInterval = 0.7
-    private let echoFeedback: Float = 18
-    private let echoLowPassCutoff: Float = 9000
-    private let echoBoostDb: Float = 18
-    private let duckingStrength: Float = 0.65
-    private let duckingResponse: Float = 0.22
-    private let duckingLevelScale: Float = 0.8
-    private let duckingDelay: CFTimeInterval = 0.12
-    private let echoTriggerRise: Float = 0.02
-    private let echoRetriggerInterval: CFTimeInterval = 1.0
-    private let echoHoldDuration: CFTimeInterval = 0.55
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
     private var duckingLevel: Float = 1.0
     private var lastCurvedLevel: Float = 0
-    private var lastEchoTriggerTime: CFTimeInterval = 0
+    private var lastEchoTriggerTime: Double = 0
+
+    func resetEchoDefaults() {
+        echoGateThreshold = EchoDefaults.gateThreshold
+        echoGateAttack = EchoDefaults.gateAttack
+        echoGateRelease = EchoDefaults.gateRelease
+        echoWetMixBase = EchoDefaults.wetMixBase
+        echoWetMixRange = EchoDefaults.wetMixRange
+        echoDelayTime = EchoDefaults.delayTime
+        echoFeedback = EchoDefaults.feedback
+        echoLowPassCutoff = EchoDefaults.lowPassCutoff
+        echoBoostDb = EchoDefaults.boostDb
+        duckingStrength = EchoDefaults.duckingStrength
+        duckingResponse = EchoDefaults.duckingResponse
+        duckingLevelScale = EchoDefaults.duckingLevelScale
+        duckingDelay = EchoDefaults.duckingDelay
+        echoTriggerRise = EchoDefaults.triggerRise
+        echoRetriggerInterval = EchoDefaults.retriggerInterval
+        echoHoldDuration = EchoDefaults.holdDuration
+    }
 
     func startListening() {
         guard !isListening else { return }
@@ -558,7 +825,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let duckedMix = echoMix * duckingLevel
 
         gateMixer?.outputVolume = duckedMix
-        delayNode?.wetDryMix = echoWetMixBase + echoWetMixRange * echoMix
+        delayNode?.delayTime = echoDelayTime
+        delayNode?.feedback = echoFeedback
+        delayNode?.lowPassCutoff = echoLowPassCutoff
+        let wetMix = min(100, max(0, echoWetMixBase + echoWetMixRange * echoMix))
+        delayNode?.wetDryMix = wetMix
         boostNode?.globalGain = echoBoostDb
 
         DispatchQueue.main.async { [weak self] in
