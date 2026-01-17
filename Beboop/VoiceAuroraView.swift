@@ -816,9 +816,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private func startSpatialCapture() {
         do {
             deactivateAudioSession()
+            guard configureCaptureAudioSession() else {
+                return
+            }
             let sessionCapture = AVCaptureSession()
             sessionCapture.usesApplicationAudioSession = true
-            sessionCapture.automaticallyConfiguresApplicationAudioSession = true
+            sessionCapture.automaticallyConfiguresApplicationAudioSession = false
             sessionCapture.beginConfiguration()
 
             guard let device = AVCaptureDevice.default(for: .audio) else {
@@ -850,8 +853,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             captureOutput = output
             isListening = true
 
-            applyPlaybackOverrides()
-
             captureQueue.async {
                 sessionCapture.startRunning()
             }
@@ -860,15 +861,17 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
-    private func applyPlaybackOverrides() {
+    private func configureCaptureAudioSession() -> Bool {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
             try session.setPreferredInputNumberOfChannels(4)
             try session.setActive(true)
             try session.overrideOutputAudioPort(.speaker)
+            return true
         } catch {
             print("Failed to configure audio session: \(error)")
+            return false
         }
     }
 
