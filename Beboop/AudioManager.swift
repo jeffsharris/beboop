@@ -223,6 +223,7 @@ final class AudioManager: NSObject, ObservableObject {
         }
 
         playbackStartTimes[tileIndex] = Date()
+        playbackProgress[tileIndex] = 0
         startMetering(for: tileIndex, on: chain.mixer)
 
         let generator = UIImpactFeedbackGenerator(style: .soft)
@@ -249,6 +250,7 @@ final class AudioManager: NSObject, ObservableObject {
         }
         loopingTiles.insert(tileIndex)
         playbackStartTimes[tileIndex] = Date()
+        playbackProgress[tileIndex] = 0
         scheduleLoop(for: tileIndex, buffer: buffer, chain: chain)
     }
 
@@ -534,8 +536,9 @@ final class AudioManager: NSObject, ObservableObject {
         playbackLevels[tileIndex] = 0
         if didFinish {
             playbackProgress[tileIndex] = 1.0
+        } else {
+            playbackProgress[tileIndex] = nil
         }
-        playbackProgress[tileIndex] = nil
         playbackStartTimes[tileIndex] = nil
     }
 
@@ -576,6 +579,7 @@ final class AudioManager: NSObject, ObservableObject {
 
             fallbackPlayers[tileIndex] = player
             playbackStartTimes[tileIndex] = Date()
+            playbackProgress[tileIndex] = 0
             startFallbackMetering(for: tileIndex, player: player, loop: loop)
         } catch {
             print("Fallback playback failed: \(error)")
@@ -622,8 +626,9 @@ final class AudioManager: NSObject, ObservableObject {
         fallbackMeterTimers[tileIndex] = nil
         if didFinish {
             playbackProgress[tileIndex] = 1.0
+        } else {
+            playbackProgress[tileIndex] = nil
         }
-        playbackProgress[tileIndex] = nil
         playbackStartTimes[tileIndex] = nil
         playbackLevels[tileIndex] = 0
     }

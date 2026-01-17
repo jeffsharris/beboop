@@ -22,7 +22,7 @@ struct AudioBlobView: View {
 
     /// Current rotation in degrees (0-360)
     private var rotationDegrees: Double {
-        (rotationTurns + effectiveProgress) * 360
+        rotationProgress * 360
     }
 
     /// Whether playback is active
@@ -32,10 +32,7 @@ struct AudioBlobView: View {
 
     @State private var lastProgress: Double = 0
     @State private var rotationTurns: Double = 0
-
-    private var effectiveProgress: Double {
-        playbackProgress ?? lastProgress
-    }
+    @State private var rotationProgress: Double = 0
 
     var body: some View {
         ZStack {
@@ -78,6 +75,7 @@ struct AudioBlobView: View {
                 rotationTurns += 1
             }
             lastProgress = newValue
+            rotationProgress = rotationTurns + newValue
         }
     }
 }
