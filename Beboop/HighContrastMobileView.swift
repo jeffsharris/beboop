@@ -57,8 +57,8 @@ struct HighContrastMobileView: View {
     private let maxVelocity: CGFloat = 900  // Cap velocity to keep things playable
     private let collisionRestitution: CGFloat = 0.9
     private let collisionCooldown: TimeInterval = 0.12
-    private let inertialAccelerationScale: CGFloat = 1400
-    private let inertialAccelerationThreshold: CGFloat = 0.03
+    private let inertialAccelerationScale: CGFloat = 5200
+    private let inertialAccelerationThreshold: CGFloat = 0.01
 
     @State private var lastCollisionTimes: [String: Date] = [:]
 
@@ -1016,7 +1016,7 @@ final class ChimePlayer: ObservableObject {
     private func configureAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.ambient, options: [.mixWithOthers])
+            try session.setCategory(.playback, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             print("Chime audio session setup failed: \(error)")

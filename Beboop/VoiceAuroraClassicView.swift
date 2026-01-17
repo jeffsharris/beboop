@@ -270,6 +270,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         pendingStartWorkItem = nil
         isListening = false
         audioEngine?.stop()
+        audioEngine?.reset()
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
         gateMixer = nil

@@ -1060,12 +1060,14 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         pendingStartWorkItem?.cancel()
         pendingStartWorkItem = nil
         isListening = false
-        captureOutput?.setSampleBufferDelegate(nil, queue: nil)
-        captureSession?.stopRunning()
+        let sessionToStop = captureSession
+        let outputToStop = captureOutput
         captureSession = nil
         captureInput = nil
         captureOutput = nil
         captureQueue.async { [weak self] in
+            outputToStop?.setSampleBufferDelegate(nil, queue: nil)
+            sessionToStop?.stopRunning()
             self?.isCapturing = false
             self?.isInjecting = false
             self?.captureSamples.removeAll()
@@ -1080,8 +1082,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self?.lastTriggerLevel = 0
             self?.echoMix = 0
             self?.stopPlaybackEngine()
+            DispatchQueue.main.async { [weak self] in
+                self?.deactivateAudioSession()
+            }
         }
-        deactivateAudioSession()
     }
 
     private func startSpatialCapture() {

@@ -18,7 +18,8 @@ struct BeboopApp: App {
 
 enum AudioHandoff {
     static let stopNotification = Notification.Name("audioHandoffStop")
-    static let startDelay: TimeInterval = 0.2
+    static let startDelay: TimeInterval = 0.35
+    static let switchDelay: TimeInterval = 0.2
 
     static func notifyStop() {
         NotificationCenter.default.post(name: stopNotification, object: nil)

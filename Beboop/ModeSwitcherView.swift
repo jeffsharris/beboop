@@ -38,6 +38,7 @@ struct ModeSwitcherView: View {
 
     @AppStorage("lastActiveMode") private var storedMode = AppMode.cozyCoos.rawValue
     @State private var isMenuPresented = false
+    @State private var pendingModeWorkItem: DispatchWorkItem?
 
     var body: some View {
         ZStack {
@@ -107,8 +108,14 @@ struct ModeSwitcherView: View {
 
                 ForEach(AppMode.allCases) { mode in
                     Button {
+                        pendingModeWorkItem?.cancel()
                         AudioHandoff.notifyStop()
-                        storedMode = mode.rawValue
+                        let workItem = DispatchWorkItem {
+                            storedMode = mode.rawValue
+                        }
+                        pendingModeWorkItem = workItem
+                        DispatchQueue.main.asyncAfter(deadline: .now() + AudioHandoff.switchDelay,
+                                                      execute: workItem)
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isMenuPresented = false
                         }
