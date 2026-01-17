@@ -29,6 +29,8 @@ for Voice Aurora so future changes stay aligned with the experience.
   gradient stops to keep overlaps luminous (screen blend + blur for glow).
 - A live "Echo Tuning" panel is available in the Voice Aurora UI (slider icon at
   bottom-left). Use it to adjust echo parameters on-device while listening.
+- The panel includes Master Output (to hard-mute the echo) and a Wet Only toggle
+  (to remove dry monitoring from the delay unit).
 
 ## Echo audio chain (AuroraAudioProcessor)
 

@@ -335,10 +335,21 @@ struct VoiceAuroraView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        sliderSectionHeader("Output")
+                        sliderRow(title: "Master Output",
+                                  value: floatBinding(\.echoMasterOutput),
+                                  range: 0...1,
+                                  step: 0.01,
+                                  format: "%.2f")
+                        Toggle("Wet Only (no dry monitor)",
+                               isOn: boolBinding(\.echoWetOnly))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.primary)
+
                         sliderSectionHeader("Gate")
                         sliderRow(title: "Gate Threshold",
                                   value: floatBinding(\.echoGateThreshold),
-                                  range: 0.02...0.3,
+                                  range: 0.02...1.2,
                                   step: 0.01,
                                   format: "%.2f")
                         sliderRow(title: "Gate Attack",
@@ -355,13 +366,13 @@ struct VoiceAuroraView: View {
                         sliderSectionHeader("Trigger")
                         sliderRow(title: "Trigger Rise",
                                   value: floatBinding(\.echoTriggerRise),
-                                  range: 0.0...0.08,
-                                  step: 0.005,
+                                  range: 0.0...0.3,
+                                  step: 0.01,
                                   format: "%.3f")
                         sliderRow(title: "Retrigger Interval",
                                   value: doubleBinding(\.echoRetriggerInterval),
-                                  range: 0.3...2.0,
-                                  step: 0.05,
+                                  range: 0.3...6.0,
+                                  step: 0.1,
                                   format: "%.2f",
                                   suffix: "s")
                         sliderRow(title: "Hold Duration",
@@ -502,6 +513,13 @@ struct VoiceAuroraView: View {
             set: { audioProcessor[keyPath: keyPath] = $0 }
         )
     }
+
+    private func boolBinding(_ keyPath: ReferenceWritableKeyPath<AuroraAudioProcessor, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { audioProcessor[keyPath: keyPath] },
+            set: { audioProcessor[keyPath: keyPath] = $0 }
+        )
+    }
 }
 
 // MARK: - Audio Processor
@@ -511,6 +529,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         static let gateThreshold: Float = 0.1
         static let gateAttack: Float = 0.75
         static let gateRelease: Float = 0.8
+        static let masterOutput: Float = 1.0
+        static let wetOnly: Bool = false
         static let wetMixBase: Float = 85
         static let wetMixRange: Float = 15
         static let delayTime: Double = 0.7
@@ -532,6 +552,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     @Published var echoGateThreshold: Float = EchoDefaults.gateThreshold
     @Published var echoGateAttack: Float = EchoDefaults.gateAttack
     @Published var echoGateRelease: Float = EchoDefaults.gateRelease
+    @Published var echoMasterOutput: Float = EchoDefaults.masterOutput
+    @Published var echoWetOnly: Bool = EchoDefaults.wetOnly
     @Published var echoWetMixBase: Float = EchoDefaults.wetMixBase
     @Published var echoWetMixRange: Float = EchoDefaults.wetMixRange
     @Published var echoDelayTime: Double = EchoDefaults.delayTime
@@ -577,6 +599,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         echoGateThreshold = EchoDefaults.gateThreshold
         echoGateAttack = EchoDefaults.gateAttack
         echoGateRelease = EchoDefaults.gateRelease
+        echoMasterOutput = EchoDefaults.masterOutput
+        echoWetOnly = EchoDefaults.wetOnly
         echoWetMixBase = EchoDefaults.wetMixBase
         echoWetMixRange = EchoDefaults.wetMixRange
         echoDelayTime = EchoDefaults.delayTime
@@ -824,11 +848,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
         let duckedMix = echoMix * duckingLevel
 
-        gateMixer?.outputVolume = duckedMix
+        let outputLevel = max(0, min(1, echoMasterOutput))
+        gateMixer?.outputVolume = duckedMix * outputLevel
         delayNode?.delayTime = echoDelayTime
         delayNode?.feedback = echoFeedback
         delayNode?.lowPassCutoff = echoLowPassCutoff
-        let wetMix = min(100, max(0, echoWetMixBase + echoWetMixRange * echoMix))
+        let wetMix = echoWetOnly ? 100 : min(100, max(0, echoWetMixBase + echoWetMixRange * echoMix))
         delayNode?.wetDryMix = wetMix
         boostNode?.globalGain = echoBoostDb
 
