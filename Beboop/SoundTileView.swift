@@ -122,9 +122,7 @@ struct SoundTileView: View {
                 .foregroundColor(.white.opacity(0.9))
                 .scaleEffect(playBounce ? 1.2 : 1.0)
         } else {
-            Image(systemName: "mic.fill")
-                .font(.system(size: size * 0.16, weight: .medium))
-                .foregroundColor(color.opacity(0.5))
+            EmptyView()
         }
     }
 
