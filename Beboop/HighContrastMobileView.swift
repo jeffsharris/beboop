@@ -33,6 +33,7 @@ struct HighContrastMobileView: View {
     @State private var adjustingShapeIndex: Int? = nil
     @State private var adjustStartSize: CGFloat = 1.0
     @State private var adjustStartBaseline: CGFloat = 0.0
+    @State private var isFrozen = false
 
     // Animation state
     @State private var shapes: [ShapeState] = []
@@ -47,7 +48,7 @@ struct HighContrastMobileView: View {
     private let minShapeScale: CGFloat = 0.6
     private let maxShapeScale: CGFloat = 1.8
     private let minBaselineSpeed: CGFloat = 0.0
-    private let maxBaselineSpeed: CGFloat = 240.0
+    private let maxBaselineSpeed: CGFloat = 320.0
     private let minBaseSize: CGFloat = 0.12
     private let maxBaseSize: CGFloat = 0.24
     private let initialShapeCount = 5
@@ -70,8 +71,14 @@ struct HighContrastMobileView: View {
             GeometryReader { geometry in
                 TimelineView(.animation) { timeline in
                     Canvas { context, size in
-                        for shape in shapes {
+                        for (index, shape) in shapes.enumerated() {
                             draw(shape: shape, in: size, context: &context)
+                            if isFrozen {
+                                drawVelocityIndicator(for: shape,
+                                                     index: index,
+                                                     in: size,
+                                                     context: &context)
+                            }
                         }
                     }
                     .onChange(of: timeline.date) { _, newDate in
@@ -104,7 +111,17 @@ struct HighContrastMobileView: View {
                 }
                 .gesture(combinedGesture)
             }
+            FreezeTouchOverlay(
+                shouldActivate: { location in
+                    hitTest(at: location) == nil
+                },
+                onFreezeChanged: { isFrozen = $0 }
+            )
+            .ignoresSafeArea()
             TwoFingerGestureOverlay(
+                hitTestShape: { location in
+                    hitTest(at: location)
+                },
                 onPanBegan: handleTwoFingerPanBegan,
                 onPanChanged: handleTwoFingerPanChanged,
                 onPanEnded: handleTwoFingerPanEnded,
@@ -129,6 +146,10 @@ struct HighContrastMobileView: View {
 
     private func handleDragChanged(_ value: DragGesture.Value) {
         let location = value.location
+
+        if isFrozen {
+            return
+        }
 
         if draggedShapeIndex == nil {
             guard adjustingShapeIndex == nil else { return }
@@ -160,6 +181,12 @@ struct HighContrastMobileView: View {
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
+        if isFrozen {
+            draggedShapeIndex = nil
+            dragVelocity = .zero
+            return
+        }
+
         if let shapeIndex = draggedShapeIndex {
             var newVelocity = CGPoint(x: dragVelocity.x, y: dragVelocity.y)
             let flingBoost: CGFloat = 1.5
@@ -176,6 +203,10 @@ struct HighContrastMobileView: View {
     }
 
     private func handleTwoFingerPanBegan(_ location: CGPoint) {
+        guard isFrozen else {
+            adjustingShapeIndex = nil
+            return
+        }
         guard let hit = hitTest(at: location) else {
             adjustingShapeIndex = nil
             return
@@ -188,11 +219,12 @@ struct HighContrastMobileView: View {
     }
 
     private func handleTwoFingerPanChanged(_ translation: CGPoint) {
+        guard isFrozen else { return }
         guard let index = adjustingShapeIndex else { return }
 
-        let sizeDelta = translation.x / 200.0
+        let sizeDelta = -translation.y / 180.0
         let speedAdjustmentScale = (maxBaselineSpeed - minBaselineSpeed) / 260.0
-        let speedDelta = -translation.y * speedAdjustmentScale
+        let speedDelta = translation.x * speedAdjustmentScale
 
         var shape = shapes[index]
         shape.sizeScale = (adjustStartSize + sizeDelta).clamped(to: minShapeScale...maxShapeScale)
@@ -327,6 +359,11 @@ struct HighContrastMobileView: View {
         }
         if shapes.isEmpty {
             initializeShapesIfNeeded(in: screenSize)
+            lastUpdateTime = date
+            return
+        }
+
+        if isFrozen {
             lastUpdateTime = date
             return
         }
@@ -852,9 +889,52 @@ struct HighContrastMobileView: View {
         path.closeSubpath()
         context.fill(path, with: .color(shape.color))
     }
+
+    private func drawVelocityIndicator(for shape: ShapeState,
+                                       index: Int,
+                                       in size: CGSize,
+                                       context: inout GraphicsContext) {
+        let speed = shape.baselineSpeed.clamped(to: minBaselineSpeed...maxBaselineSpeed)
+        let minDim = min(size.width, size.height)
+        let maxLength = minDim * 0.12
+        let t = maxBaselineSpeed > 0 ? speed / maxBaselineSpeed : 0
+        let length = maxLength * t
+
+        let velocity = shape.velocity
+        let magnitude = sqrt(velocity.x * velocity.x + velocity.y * velocity.y)
+        let direction: CGPoint
+        if magnitude > 0.01 {
+            direction = CGPoint(x: velocity.x / magnitude, y: velocity.y / magnitude)
+        } else {
+            direction = CGPoint(x: 1, y: 0)
+        }
+
+        let start = shape.position
+        let end = CGPoint(x: start.x + direction.x * length,
+                          y: start.y + direction.y * length)
+
+        var path = Path()
+        path.move(to: start)
+        path.addLine(to: end)
+
+        let isActive = adjustingShapeIndex == index
+        let strokeColor = isActive ? Color.black.opacity(0.85) : Color.black.opacity(0.45)
+        let strokeStyle = StrokeStyle(lineWidth: isActive ? 3 : 2,
+                                      lineCap: .round,
+                                      lineJoin: .round)
+        context.stroke(path, with: .color(strokeColor), style: strokeStyle)
+
+        let dotSize = isActive ? minDim * 0.018 : minDim * 0.014
+        let dotRect = CGRect(x: end.x - dotSize * 0.5,
+                             y: end.y - dotSize * 0.5,
+                             width: dotSize,
+                             height: dotSize)
+        context.fill(Path(ellipseIn: dotRect), with: .color(strokeColor))
+    }
 }
 
 private struct TwoFingerGestureOverlay: UIViewRepresentable {
+    var hitTestShape: (CGPoint) -> Int?
     var onPanBegan: (CGPoint) -> Void
     var onPanChanged: (CGPoint) -> Void
     var onPanEnded: (CGPoint) -> Void
@@ -900,6 +980,8 @@ private struct TwoFingerGestureOverlay: UIViewRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         private let parent: TwoFingerGestureOverlay
+        private var activeTouchIndex: Int?
+        private var activeStartPoint: CGPoint = .zero
 
         init(_ parent: TwoFingerGestureOverlay) {
             self.parent = parent
@@ -907,18 +989,32 @@ private struct TwoFingerGestureOverlay: UIViewRepresentable {
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
             guard let view = recognizer.view else { return }
-            let location = recognizer.location(in: view)
-            let translation = recognizer.translation(in: view)
-            let translationPoint = CGPoint(x: translation.x, y: translation.y)
-
             switch recognizer.state {
             case .began:
-                parent.onPanBegan(location)
+                activeTouchIndex = nil
+                guard recognizer.numberOfTouches >= 2 else { return }
+                let touch0 = recognizer.location(ofTouch: 0, in: view)
+                let touch1 = recognizer.location(ofTouch: 1, in: view)
+                if parent.hitTestShape(touch0) != nil {
+                    activeTouchIndex = 0
+                    activeStartPoint = touch0
+                    parent.onPanBegan(touch0)
+                } else if parent.hitTestShape(touch1) != nil {
+                    activeTouchIndex = 1
+                    activeStartPoint = touch1
+                    parent.onPanBegan(touch1)
+                } else {
+                    parent.onPanEnded(.zero)
+                }
             case .changed:
+                guard let activeTouchIndex else { return }
+                let location = recognizer.location(ofTouch: activeTouchIndex, in: view)
+                let translationPoint = CGPoint(x: location.x - activeStartPoint.x,
+                                               y: location.y - activeStartPoint.y)
                 parent.onPanChanged(translationPoint)
             case .ended, .cancelled, .failed:
-                let velocity = recognizer.velocity(in: view)
-                parent.onPanEnded(CGPoint(x: velocity.x, y: velocity.y))
+                parent.onPanEnded(.zero)
+                activeTouchIndex = nil
             default:
                 break
             }
@@ -947,6 +1043,66 @@ private final class PassthroughTwoFingerView: UIView {
             return nil
         }
         return super.hitTest(point, with: event)
+    }
+}
+
+private struct FreezeTouchOverlay: UIViewRepresentable {
+    var shouldActivate: (CGPoint) -> Bool
+    var onFreezeChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let press = UILongPressGestureRecognizer(target: context.coordinator,
+                                                 action: #selector(Coordinator.handlePress(_:)))
+        press.minimumPressDuration = 0
+        press.cancelsTouchesInView = false
+        press.delaysTouchesBegan = false
+        press.delaysTouchesEnded = false
+        press.delegate = context.coordinator
+        view.addGestureRecognizer(press)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let parent: FreezeTouchOverlay
+        private var isActive = false
+
+        init(_ parent: FreezeTouchOverlay) {
+            self.parent = parent
+        }
+
+        @objc func handlePress(_ recognizer: UILongPressGestureRecognizer) {
+            switch recognizer.state {
+            case .began:
+                isActive = true
+                parent.onFreezeChanged(true)
+            case .ended, .cancelled, .failed:
+                guard isActive else { return }
+                isActive = false
+                parent.onFreezeChanged(false)
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldReceive touch: UITouch) -> Bool {
+            guard let view = touch.view else { return false }
+            let location = touch.location(in: view)
+            return parent.shouldActivate(location)
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
     }
 }
 

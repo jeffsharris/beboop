@@ -58,6 +58,15 @@ struct VoiceAuroraView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    audioProcessor.setMicMuted(true)
+                }
+                .onEnded { _ in
+                    audioProcessor.setMicMuted(false)
+                }
+        )
         .sheet(isPresented: $isEchoLabPresented) {
             EchoLabView(audioProcessor: audioProcessor,
                         isPresented: $isEchoLabPresented)
@@ -74,6 +83,7 @@ struct VoiceAuroraView: View {
                                       })
         }
         .onDisappear {
+            audioProcessor.setMicMuted(false)
             audioCoordinator.unregister(mode: .voiceAurora)
         }
     }
@@ -591,6 +601,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private let bleedRiseGuardDB: Float = 1.5
     private let outDBFloor: Float = -160
     private let outDBMeter = AtomicFloat(initialValue: -160)
+    private let micMuteFlag = AtomicFlag(initialValue: false)
+    private var wasMicMuted = false
     private var isWetTapInstalled = false
     private var wetMeterNode: AVAudioNode?
     private var lastDebugPublishTime: Double = 0
@@ -1093,6 +1105,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
+    func setMicMuted(_ muted: Bool) {
+        micMuteFlag.set(muted)
+    }
+
     private func startSpatialCapture() {
         do {
             deactivateAudioSession()
@@ -1332,15 +1348,23 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
 
         let rms = sqrt(sumGate2 / Float(frames))
+        let micMuted = micMuteFlag.get()
+        let suppressRise = micMuted || wasMicMuted
         let inputGain = echoInputGain.clamped(to: 0.0...24.0)
         let inputCurve = echoInputCurve.clamped(to: 0.2...2.5)
-        let normalizedLevel = min(1.0, rms * inputGain)
+        let normalizedLevel = micMuted ? 0 : min(1.0, rms * inputGain)
         let inputFloor = echoInputFloor.clamped(to: 0.0...1.5)
-        let effectiveLevel: Float = normalizedLevel < inputFloor ? 0 : normalizedLevel
-        let curvedLevel = pow(effectiveLevel, inputCurve)
-        let micDB = 20 * log10(max(rms * inputGain, 1e-7))
-        let micRiseDB = micDB - lastMicDB
+        let effectiveLevel: Float = micMuted ? 0 : (normalizedLevel < inputFloor ? 0 : normalizedLevel)
+        let curvedLevel = micMuted ? 0 : pow(effectiveLevel, inputCurve)
+        let rawMicDB = 20 * log10(max(rms * inputGain, 1e-7))
+        let micDB: Float = micMuted ? -160 : rawMicDB
+        let micRiseDB: Float = suppressRise ? 0 : micDB - lastMicDB
         lastMicDB = micDB
+        if micMuted {
+            wasMicMuted = true
+        } else if wasMicMuted {
+            wasMicMuted = false
+        }
 
         let estimatedFreq = (Double(zeroCrossings) / 2.0) * sampleRate / Double(frames)
         let logFreq = log2(estimatedFreq / 100.0) / 3.3
@@ -1366,7 +1390,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let echoActive = now < eventActiveUntil
         let triggerRise = echoActive ? max(triggerRiseBase, riseMinWhenEchoActive) : triggerRiseBase
         let retriggerInterval = max(0, echoRetriggerInterval)
-        let levelRise = curvedLevel - lastCurvedLevel
+        let levelRise: Float = suppressRise ? 0 : (curvedLevel - lastCurvedLevel)
         let passesMask = shouldTrigger(micDB: micDB,
                                        micRiseDB: micRiseDB,
                                        echoActive: echoActive,
@@ -1374,7 +1398,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let withinCooldown = now < cooldownUntil
         let withinDeafen = labSoftLockoutEnabled && now < deafenUntil
         let triggerThreshold = echoActive ? dynamicThreshold : gateThreshold
-        let shouldAttemptTrigger = !isCapturing && curvedLevel > triggerThreshold && levelRise > triggerRise
+        let shouldAttemptTrigger = !micMuted && !isCapturing && curvedLevel > triggerThreshold && levelRise > triggerRise
         if shouldAttemptTrigger {
             if withinDeafen {
                 lastBlockReason = "Blocked (deafen)"
@@ -1992,6 +2016,28 @@ private final class AtomicFloat {
     }
 
     func get() -> Float {
+        lock.lock()
+        let current = value
+        lock.unlock()
+        return current
+    }
+}
+
+private final class AtomicFlag {
+    private let lock = NSLock()
+    private var value: Bool
+
+    init(initialValue: Bool) {
+        self.value = initialValue
+    }
+
+    func set(_ newValue: Bool) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func get() -> Bool {
         lock.lock()
         let current = value
         lock.unlock()
