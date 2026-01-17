@@ -19,7 +19,6 @@ struct VoiceAuroraClassicView: View {
     @StateObject private var audioProcessor = ClassicAuroraAudioProcessor()
     @State private var waves: [Wave] = []
     @State private var lastWaveTime: Date = .distantPast
-    @State private var isTuningPresented = false
 
     private let waveCooldown: TimeInterval = 0.16
     private let waveMinLevel: Double = 0.08
@@ -28,31 +27,21 @@ struct VoiceAuroraClassicView: View {
     private let classicSourcePoint = CGPoint(x: 0.5, y: 0.85)
 
     var body: some View {
-        GeometryReader { geometry in
-            let bottomInset = max(16, geometry.safeAreaInsets.bottom + 8)
+        GeometryReader { _ in
+            TimelineView(.animation) { timeline in
+                Canvas { context, size in
+                    let currentTime = timeline.date.timeIntervalSinceReferenceDate
+                    let level = Double(audioProcessor.smoothedLevel)
+                    let pitch = Double(audioProcessor.dominantPitch)
 
-            ZStack {
-                TimelineView(.animation) { timeline in
-                    Canvas { context, size in
-                        let currentTime = timeline.date.timeIntervalSinceReferenceDate
-                        let level = Double(audioProcessor.smoothedLevel)
-                        let pitch = Double(audioProcessor.dominantPitch)
-
-                        drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
-                        drawWaves(context: &context, size: size, time: currentTime)
-                    }
-                    .onChange(of: timeline.date) { _, newDate in
-                        updateWaves(at: newDate)
-                    }
+                    drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
+                    drawWaves(context: &context, size: size, time: currentTime)
                 }
-                .ignoresSafeArea()
-
-                tuningButton(bottomInset: bottomInset)
-
-                if isTuningPresented {
-                    tuningPanel(bottomInset: bottomInset)
+                .onChange(of: timeline.date) { _, newDate in
+                    updateWaves(at: newDate)
                 }
             }
+            .ignoresSafeArea()
         }
         .onAppear {
             audioProcessor.startListening()
@@ -221,99 +210,11 @@ struct VoiceAuroraClassicView: View {
         path.closeSubpath()
         return path
     }
-
-    private func tuningButton(bottomInset: CGFloat) -> some View {
-        VStack {
-            Spacer()
-            HStack {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isTuningPresented.toggle()
-                    }
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 4)
-                }
-                .buttonStyle(.plain)
-                .padding(.leading, 18)
-                .padding(.bottom, bottomInset)
-                Spacer()
-            }
-        }
-    }
-
-    private func tuningPanel(bottomInset: CGFloat) -> some View {
-        VStack {
-            Spacer()
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Classic Echo")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isTuningPresented = false
-                        }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 28, height: 28)
-                            .background(.thinMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                sliderRow(title: "Output Level",
-                          value: Binding(
-                            get: { Double(audioProcessor.echoOutputLevel) },
-                            set: { audioProcessor.echoOutputLevel = Float($0) }
-                          ),
-                          range: 0...2,
-                          step: 0.05,
-                          format: "%.2f")
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(.ultraThinMaterial)
-            )
-            .padding(.horizontal, 16)
-            .padding(.bottom, bottomInset)
-            .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
-        }
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-
-    private func sliderRow(title: String,
-                           value: Binding<Double>,
-                           range: ClosedRange<Double>,
-                           step: Double,
-                           format: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(.primary)
-                Spacer()
-                Text(String(format: format, value.wrappedValue))
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.secondary)
-            }
-            Slider(value: value, in: range, step: step)
-        }
-    }
 }
 
 final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
-    @Published var echoOutputLevel: Float = 1.0
 
     private var audioEngine: AVAudioEngine?
     private var gateMixer: AVAudioMixerNode?
@@ -353,11 +254,13 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         gateMixer = nil
         delayNode = nil
         boostNode = nil
+        deactivateAudioSession()
     }
 
     private func setupAudioEngine() {
         do {
             let session = AVAudioSession.sharedInstance()
+            deactivateAudioSession()
             try configureAudioSession(session)
 
             let engine = AVAudioEngine()
@@ -416,6 +319,15 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
+    private func deactivateAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            print("Aurora classic audio deactivation failed: \(error)")
+        }
+    }
+
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         let frames = Int(buffer.frameLength)
         guard frames > 0 else { return }
@@ -471,7 +383,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
             self.smoothedLevel = self.levelHistory.reduce(0, +) / Float(self.levelHistory.count)
             self.dominantPitch = self.dominantPitch * 0.85 + normalizedPitch * 0.15
 
-            self.gateMixer?.outputVolume = self.echoMix * self.echoOutputLevel
+            self.gateMixer?.outputVolume = self.echoMix
             self.delayNode?.wetDryMix = self.echoWetMixBase + self.echoWetMixRange * self.echoMix
         }
     }

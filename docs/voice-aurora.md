@@ -32,6 +32,8 @@ for Voice Aurora so future changes stay aligned with the experience.
   persist across launches.
 - The panel includes Master Output (to hard-mute the echo) and a Wet Only toggle
   (to remove dry monitoring from the delay unit).
+- "Input Output Ratio" scales the echo output by the input level (0 = constant
+  output, 1 = output tracks input volume), helping tune the input/output balance.
 - Input Mapping includes a 2D pad (gain vs curve) plus a curve preview so you can
   see how mic level maps into the gate/echo.
 - Echo Tail includes a 2D pad (delay vs feedback) for quick decay/spacing tuning.
@@ -102,8 +104,6 @@ Tuning notes:
   + `AVAudioSession` `.voiceChat`) to keep Apple’s echo cancellation and AGC active.
 - Waves always emanate from the bottom center, so there is no spatial direction
   logic in this mode.
-- A small "Classic Echo" panel (slider icon at bottom-left) exposes the output
-  multiplier for quick loudness tuning.
 
 ## Quick troubleshooting checklist
 

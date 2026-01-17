@@ -341,6 +341,11 @@ struct VoiceAuroraView: View {
                                   range: 0...1,
                                   step: 0.01,
                                   format: "%.2f")
+                        sliderRow(title: "Input Output Ratio",
+                                  value: floatBinding(\.echoOutputRatio),
+                                  range: 0...1,
+                                  step: 0.02,
+                                  format: "%.2f")
                         Toggle("Wet Only (no dry monitor)",
                                isOn: boolBinding(\.echoWetOnly))
                             .font(.subheadline.weight(.medium))
@@ -760,6 +765,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         static let gateAttack: Float = 0.75
         static let gateRelease: Float = 0.8
         static let masterOutput: Float = 1.0
+        static let outputRatio: Float = 0.0
         static let wetOnly: Bool = false
         static let wetMixBase: Float = 85
         static let wetMixRange: Float = 15
@@ -784,6 +790,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         case gateAttack = "voiceAurora.echo.gateAttack"
         case gateRelease = "voiceAurora.echo.gateRelease"
         case masterOutput = "voiceAurora.echo.masterOutput"
+        case outputRatio = "voiceAurora.echo.outputRatio"
         case wetOnly = "voiceAurora.echo.wetOnly"
         case wetMixBase = "voiceAurora.echo.wetMixBase"
         case wetMixRange = "voiceAurora.echo.wetMixRange"
@@ -823,6 +830,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     }
     @Published var echoMasterOutput: Float = EchoDefaults.masterOutput {
         didSet { persistSetting(.masterOutput, value: echoMasterOutput) }
+    }
+    @Published var echoOutputRatio: Float = EchoDefaults.outputRatio {
+        didSet { persistSetting(.outputRatio, value: echoOutputRatio) }
     }
     @Published var echoWetOnly: Bool = EchoDefaults.wetOnly {
         didSet { persistSetting(.wetOnly, value: echoWetOnly) }
@@ -909,6 +919,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         echoGateAttack = EchoDefaults.gateAttack
         echoGateRelease = EchoDefaults.gateRelease
         echoMasterOutput = EchoDefaults.masterOutput
+        echoOutputRatio = EchoDefaults.outputRatio
         echoWetOnly = EchoDefaults.wetOnly
         echoWetMixBase = EchoDefaults.wetMixBase
         echoWetMixRange = EchoDefaults.wetMixRange
@@ -934,6 +945,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         echoGateAttack = loadFloat(.gateAttack, fallback: EchoDefaults.gateAttack)
         echoGateRelease = loadFloat(.gateRelease, fallback: EchoDefaults.gateRelease)
         echoMasterOutput = loadFloat(.masterOutput, fallback: EchoDefaults.masterOutput)
+        echoOutputRatio = loadFloat(.outputRatio, fallback: EchoDefaults.outputRatio)
         echoWetOnly = loadBool(.wetOnly, fallback: EchoDefaults.wetOnly)
         echoWetMixBase = loadFloat(.wetMixBase, fallback: EchoDefaults.wetMixBase)
         echoWetMixRange = loadFloat(.wetMixRange, fallback: EchoDefaults.wetMixRange)
@@ -1011,10 +1023,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         captureQueue.async { [weak self] in
             self?.stopPlaybackEngine()
         }
+        deactivateAudioSession()
     }
 
     private func startSpatialCapture() {
         do {
+            deactivateAudioSession()
             let sessionCapture = AVCaptureSession()
             sessionCapture.usesApplicationAudioSession = true
             sessionCapture.automaticallyConfiguresApplicationAudioSession = true
@@ -1068,6 +1082,15 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             try session.overrideOutputAudioPort(.speaker)
         } catch {
             print("Failed to override audio output: \(error)")
+        }
+    }
+
+    private func deactivateAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            print("Aurora audio deactivation failed: \(error)")
         }
     }
 
@@ -1234,7 +1257,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let duckedMix = echoMix * duckingLevel
 
         let outputLevel = echoMasterOutput.clamped(to: 0.0...1.0)
-        gateMixer?.outputVolume = duckedMix * outputLevel
+        let outputRatio = echoOutputRatio.clamped(to: 0.0...1.0)
+        let inputScale = (1 - outputRatio) + outputRatio * curvedLevel
+        gateMixer?.outputVolume = duckedMix * outputLevel * inputScale
         delayNode?.delayTime = echoDelayTime.clamped(to: 0.0...2.0)
         delayNode?.feedback = echoFeedback.clamped(to: -100.0...100.0)
         delayNode?.lowPassCutoff = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
