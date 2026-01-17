@@ -30,10 +30,10 @@ struct HighContrastMobileView: View {
     @State private var lastDragPosition: CGPoint = .zero
     @State private var lastDragTime: Date = .distantPast
     @State private var dragVelocity: CGPoint = .zero
-    @State private var freezeTouchActive = false
     @State private var isFrozen = false
     @State private var resizingShapeIndex: Int? = nil
     @State private var resizeStartScale: CGFloat = 1.0
+    @State private var resizeStartPoint: CGPoint = .zero
 
     // Animation state
     @State private var shapes: [ShapeState] = []
@@ -106,14 +106,26 @@ struct HighContrastMobileView: View {
                 .gesture(combinedGesture)
             }
             .overlay(
+                FreezeTouchOverlay(
+                    hitTestShape: { location in
+                        hitTest(at: location)
+                    },
+                    onFreezeChanged: { isFrozen = $0
+                        if !$0 { resizingShapeIndex = nil }
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
+            .overlay(
                 FrozenResizeOverlay(
                     isFrozen: { isFrozen },
                     hitTestShape: { location in
                         hitTest(at: location)
                     },
-                    onResizeBegan: { index, _ in
+                    onResizeBegan: { index, start in
                         resizingShapeIndex = index
                         resizeStartScale = shapes[index].sizeScale
+                        resizeStartPoint = start
                         draggedShapeIndex = nil
                         dragVelocity = .zero
                     },
@@ -149,21 +161,27 @@ struct HighContrastMobileView: View {
     private func handleDragChanged(_ value: DragGesture.Value) {
         let location = value.location
 
-        if freezeTouchActive {
-            isFrozen = true
+        if isFrozen {
+            if let shapeIndex = draggedShapeIndex {
+                if resizingShapeIndex == nil {
+                    resizingShapeIndex = shapeIndex
+                    resizeStartScale = shapes[shapeIndex].sizeScale
+                    resizeStartPoint = location
+                }
+                let sizeDelta = -(location.y - resizeStartPoint.y) / 180.0
+                var shape = shapes[shapeIndex]
+                shape.sizeScale = (resizeStartScale + sizeDelta).clamped(to: minShapeScale...maxShapeScale)
+                shape.position = clampedPosition(for: shape, proposed: shape.position, in: screenSize)
+                shapes[shapeIndex] = shape
+                lastDragPosition = location
+                lastDragTime = value.time
+            }
             return
         }
 
         if draggedShapeIndex == nil {
-            if let hit = hitTest(at: value.startLocation) {
-                isFrozen = false
-                freezeTouchActive = false
-                draggedShapeIndex = hit
-            } else {
-                freezeTouchActive = true
-                isFrozen = true
-                return
-            }
+            guard let hit = hitTest(at: value.startLocation) else { return }
+            draggedShapeIndex = hit
             dragVelocity = .zero
             lastDragPosition = location
             lastDragTime = value.time
@@ -190,9 +208,7 @@ struct HighContrastMobileView: View {
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
-        if freezeTouchActive {
-            freezeTouchActive = false
-            isFrozen = false
+        if isFrozen {
             resizingShapeIndex = nil
             draggedShapeIndex = nil
             dragVelocity = .zero
@@ -212,6 +228,7 @@ struct HighContrastMobileView: View {
 
         draggedShapeIndex = nil
         dragVelocity = .zero
+        resizingShapeIndex = nil
     }
 
     // MARK: - Physics
@@ -844,6 +861,64 @@ struct HighContrastMobileView: View {
 private extension CGFloat {
     func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
         Swift.min(range.upperBound, Swift.max(range.lowerBound, self))
+    }
+}
+
+private struct FreezeTouchOverlay: UIViewRepresentable {
+    var hitTestShape: (CGPoint) -> Int?
+    var onFreezeChanged: (Bool) -> Void
+
+    func makeUIView(context: Context) -> FreezeTouchView {
+        let view = FreezeTouchView()
+        view.backgroundColor = .clear
+        view.isMultipleTouchEnabled = true
+        view.hitTestShape = hitTestShape
+        view.onFreezeChanged = onFreezeChanged
+        return view
+    }
+
+    func updateUIView(_ uiView: FreezeTouchView, context: Context) {
+        uiView.hitTestShape = hitTestShape
+        uiView.onFreezeChanged = onFreezeChanged
+    }
+}
+
+private final class FreezeTouchView: UIView {
+    var hitTestShape: ((CGPoint) -> Int?)?
+    var onFreezeChanged: ((Bool) -> Void)?
+    private var activeTouchIDs = Set<ObjectIdentifier>()
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard let hitTestShape else { return false }
+        return hitTestShape(point) == nil
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        let wasEmpty = activeTouchIDs.isEmpty
+        for touch in touches {
+            activeTouchIDs.insert(ObjectIdentifier(touch))
+        }
+        if wasEmpty, !activeTouchIDs.isEmpty {
+            onFreezeChanged?(true)
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for touch in touches {
+            activeTouchIDs.remove(ObjectIdentifier(touch))
+        }
+        if activeTouchIDs.isEmpty {
+            onFreezeChanged?(false)
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for touch in touches {
+            activeTouchIDs.remove(ObjectIdentifier(touch))
+        }
+        if activeTouchIDs.isEmpty {
+            onFreezeChanged?(false)
+        }
     }
 }
 
