@@ -30,9 +30,8 @@ struct HighContrastMobileView: View {
     @State private var lastDragPosition: CGPoint = .zero
     @State private var lastDragTime: Date = .distantPast
     @State private var dragVelocity: CGPoint = .zero
-    @State private var adjustingShapeIndex: Int? = nil
-    @State private var adjustStartSize: CGFloat = 1.0
-    @State private var adjustStartBaseline: CGFloat = 0.0
+    @State private var freezeTouchActive = false
+    @State private var isFrozen = false
 
     // Animation state
     @State private var shapes: [ShapeState] = []
@@ -104,21 +103,13 @@ struct HighContrastMobileView: View {
                 }
                 .gesture(combinedGesture)
             }
-            TwoFingerGestureOverlay(
-                onPanBegan: handleTwoFingerPanBegan,
-                onPanChanged: handleTwoFingerPanChanged,
-                onPanEnded: handleTwoFingerPanEnded,
-                onTap: handleTwoFingerTap,
-                onDoubleTap: handleTwoFingerDoubleTap
-            )
-            .ignoresSafeArea()
         }
     }
 
     // MARK: - Gestures
 
     private var combinedGesture: some Gesture {
-        DragGesture(minimumDistance: 5)
+        DragGesture(minimumDistance: 0)
             .onChanged { value in
                 handleDragChanged(value)
             }
@@ -130,10 +121,21 @@ struct HighContrastMobileView: View {
     private func handleDragChanged(_ value: DragGesture.Value) {
         let location = value.location
 
+        if freezeTouchActive {
+            isFrozen = true
+            return
+        }
+
         if draggedShapeIndex == nil {
-            guard adjustingShapeIndex == nil else { return }
-            guard let hit = hitTest(at: value.startLocation) else { return }
-            draggedShapeIndex = hit
+            if let hit = hitTest(at: value.startLocation) {
+                isFrozen = false
+                freezeTouchActive = false
+                draggedShapeIndex = hit
+            } else {
+                freezeTouchActive = true
+                isFrozen = true
+                return
+            }
             dragVelocity = .zero
             lastDragPosition = location
             lastDragTime = value.time
@@ -160,6 +162,14 @@ struct HighContrastMobileView: View {
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
+        if freezeTouchActive {
+            freezeTouchActive = false
+            isFrozen = false
+            draggedShapeIndex = nil
+            dragVelocity = .zero
+            return
+        }
+
         if let shapeIndex = draggedShapeIndex {
             var newVelocity = CGPoint(x: dragVelocity.x, y: dragVelocity.y)
             let flingBoost: CGFloat = 1.5
@@ -173,52 +183,6 @@ struct HighContrastMobileView: View {
 
         draggedShapeIndex = nil
         dragVelocity = .zero
-    }
-
-    private func handleTwoFingerPanBegan(_ location: CGPoint) {
-        guard let hit = hitTest(at: location) else {
-            adjustingShapeIndex = nil
-            return
-        }
-        adjustingShapeIndex = hit
-        adjustStartSize = shapes[hit].sizeScale
-        adjustStartBaseline = shapes[hit].baselineSpeed
-        draggedShapeIndex = nil
-        dragVelocity = .zero
-    }
-
-    private func handleTwoFingerPanChanged(_ translation: CGPoint) {
-        guard let index = adjustingShapeIndex else { return }
-
-        let sizeDelta = translation.x / 200.0
-        let speedAdjustmentScale = (maxBaselineSpeed - minBaselineSpeed) / 260.0
-        let speedDelta = -translation.y * speedAdjustmentScale
-
-        var shape = shapes[index]
-        shape.sizeScale = (adjustStartSize + sizeDelta).clamped(to: minShapeScale...maxShapeScale)
-        shape.baselineSpeed = (adjustStartBaseline + speedDelta).clamped(to: minBaselineSpeed...maxBaselineSpeed)
-        shape.position = clampedPosition(for: shape, proposed: shape.position, in: screenSize)
-        shape.velocity = enforceBaselineVelocity(shape.velocity, baselineSpeed: shape.baselineSpeed)
-        shapes[index] = shape
-
-        resolveCollisions(iterations: 2)
-    }
-
-    private func handleTwoFingerPanEnded(_ velocity: CGPoint) {
-        _ = velocity
-        adjustingShapeIndex = nil
-    }
-
-    private func handleTwoFingerTap(_ location: CGPoint) {
-        guard hitTest(at: location) == nil else { return }
-        addShape(at: location)
-    }
-
-    private func handleTwoFingerDoubleTap(_ location: CGPoint) {
-        guard let index = hitTest(at: location) else { return }
-        shapes.remove(at: index)
-        adjustingShapeIndex = nil
-        draggedShapeIndex = nil
     }
 
     // MARK: - Physics
@@ -259,12 +223,6 @@ struct HighContrastMobileView: View {
         )
         shape.position = clampedPosition(for: shape, proposed: shape.position, in: size)
         return shape
-    }
-
-    private func addShape(at location: CGPoint) {
-        let newShape = makeRandomShape(in: screenSize, position: location)
-        shapes.append(newShape)
-        resolveCollisions(iterations: 2)
     }
 
     private func randomBaseSize(for kind: ShapeState.Kind) -> CGSize {
@@ -331,6 +289,11 @@ struct HighContrastMobileView: View {
             return
         }
 
+        if isFrozen {
+            lastUpdateTime = date
+            return
+        }
+
         let orientation = currentInterfaceOrientation()
         var acceleration = accelerationVector(from: motionController.latestAcceleration, orientation: orientation)
         let magnitude = sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y)
@@ -343,7 +306,7 @@ struct HighContrastMobileView: View {
         )
 
         for i in shapes.indices {
-            if draggedShapeIndex == i || adjustingShapeIndex == i { continue }
+            if draggedShapeIndex == i { continue }
 
             var shape = shapes[i]
 
@@ -380,7 +343,6 @@ struct HighContrastMobileView: View {
     private func resolveWallCollisions() {
         for index in shapes.indices {
             let isDragged = draggedShapeIndex == index
-            let isAdjusting = adjustingShapeIndex == index
             var shape = shapes[index]
             var velocity = isDragged ? dragVelocity : shape.velocity
             var didHitWall = false
@@ -393,7 +355,7 @@ struct HighContrastMobileView: View {
                 offset.x = wallBounds.minX - bounds.minX
                 let relative = velocity.x
                 if relative < 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.x = isDragged ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
@@ -401,7 +363,7 @@ struct HighContrastMobileView: View {
                 offset.x = wallBounds.maxX - bounds.maxX
                 let relative = velocity.x
                 if relative > 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.x = isDragged ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
@@ -411,7 +373,7 @@ struct HighContrastMobileView: View {
                 offset.y = wallBounds.minY - bounds.minY
                 let relative = velocity.y
                 if relative < 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.y = isDragged ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
@@ -419,7 +381,7 @@ struct HighContrastMobileView: View {
                 offset.y = wallBounds.maxY - bounds.maxY
                 let relative = velocity.y
                 if relative > 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.y = isDragged ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
@@ -434,7 +396,7 @@ struct HighContrastMobileView: View {
 
             if isDragged {
                 dragVelocity = velocity
-            } else if !isAdjusting {
+            } else {
                 shape.velocity = velocity
             }
             shapes[index] = shape
@@ -472,13 +434,11 @@ struct HighContrastMobileView: View {
 
                 let isDraggedA = draggedShapeIndex == i
                 let isDraggedB = draggedShapeIndex == j
-                let isAdjustingA = adjustingShapeIndex == i
-                let isAdjustingB = adjustingShapeIndex == j
 
                 let massA = shapeArea(for: a)
                 let massB = shapeArea(for: b)
-                let invMassA: CGFloat = (isDraggedA || isAdjustingA) ? 0 : 1 / massA
-                let invMassB: CGFloat = (isDraggedB || isAdjustingB) ? 0 : 1 / massB
+                let invMassA: CGFloat = isDraggedA ? 0 : 1 / massA
+                let invMassB: CGFloat = isDraggedB ? 0 : 1 / massB
                 let totalInvMass = invMassA + invMassB
                 if totalInvMass == 0 { continue }
 
@@ -500,8 +460,6 @@ struct HighContrastMobileView: View {
 
                 var va = isDraggedA ? dragVelocity : a.velocity
                 var vb = isDraggedB ? dragVelocity : b.velocity
-                if isAdjustingA { va = .zero }
-                if isAdjustingB { vb = .zero }
 
                 let relativeVelocity = (vb.x - va.x) * normal.x + (vb.y - va.y) * normal.y
                 if relativeVelocity < 0 {
@@ -521,11 +479,11 @@ struct HighContrastMobileView: View {
 
                 shapes[i].position = newAPosition
                 shapes[j].position = newBPosition
-                if !isDraggedA && !isAdjustingA {
+                if !isDraggedA {
                     clampVelocity(&va)
                     shapes[i].velocity = va
                 }
-                if !isDraggedB && !isAdjustingB {
+                if !isDraggedB {
                     clampVelocity(&vb)
                     shapes[j].velocity = vb
                 }
@@ -551,7 +509,7 @@ struct HighContrastMobileView: View {
 
     private func enforceBaselineSpeeds() {
         for index in shapes.indices {
-            if draggedShapeIndex == index || adjustingShapeIndex == index { continue }
+            if draggedShapeIndex == index { continue }
 
             var shape = shapes[index]
             let adjusted = enforceBaselineVelocity(shape.velocity, baselineSpeed: shape.baselineSpeed)
@@ -851,102 +809,6 @@ struct HighContrastMobileView: View {
         }
         path.closeSubpath()
         context.fill(path, with: .color(shape.color))
-    }
-}
-
-private struct TwoFingerGestureOverlay: UIViewRepresentable {
-    var onPanBegan: (CGPoint) -> Void
-    var onPanChanged: (CGPoint) -> Void
-    var onPanEnded: (CGPoint) -> Void
-    var onTap: (CGPoint) -> Void
-    var onDoubleTap: (CGPoint) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeUIView(context: Context) -> UIView {
-        let view = PassthroughTwoFingerView()
-        view.backgroundColor = .clear
-
-        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-        panGesture.minimumNumberOfTouches = 2
-        panGesture.maximumNumberOfTouches = 2
-        panGesture.cancelsTouchesInView = false
-        panGesture.delegate = context.coordinator
-
-        let singleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        singleTap.numberOfTouchesRequired = 2
-        singleTap.numberOfTapsRequired = 1
-        singleTap.cancelsTouchesInView = false
-        singleTap.delegate = context.coordinator
-
-        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
-        doubleTap.numberOfTouchesRequired = 2
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.cancelsTouchesInView = false
-        doubleTap.delegate = context.coordinator
-
-        singleTap.require(toFail: doubleTap)
-
-        view.addGestureRecognizer(panGesture)
-        view.addGestureRecognizer(singleTap)
-        view.addGestureRecognizer(doubleTap)
-
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        private let parent: TwoFingerGestureOverlay
-
-        init(_ parent: TwoFingerGestureOverlay) {
-            self.parent = parent
-        }
-
-        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            guard let view = recognizer.view else { return }
-            let location = recognizer.location(in: view)
-            let translation = recognizer.translation(in: view)
-            let translationPoint = CGPoint(x: translation.x, y: translation.y)
-
-            switch recognizer.state {
-            case .began:
-                parent.onPanBegan(location)
-            case .changed:
-                parent.onPanChanged(translationPoint)
-            case .ended, .cancelled, .failed:
-                let velocity = recognizer.velocity(in: view)
-                parent.onPanEnded(CGPoint(x: velocity.x, y: velocity.y))
-            default:
-                break
-            }
-        }
-
-        @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
-            guard let view = recognizer.view else { return }
-            parent.onTap(recognizer.location(in: view))
-        }
-
-        @objc func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
-            guard let view = recognizer.view else { return }
-            parent.onDoubleTap(recognizer.location(in: view))
-        }
-
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            true
-        }
-    }
-}
-
-private final class PassthroughTwoFingerView: UIView {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let touches = event?.allTouches, touches.count >= 2 else {
-            return nil
-        }
-        return super.hitTest(point, with: event)
     }
 }
 
