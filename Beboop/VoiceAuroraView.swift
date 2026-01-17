@@ -1368,7 +1368,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                        frameDuration: frameDuration)
         let withinCooldown = now < cooldownUntil
         let withinDeafen = labSoftLockoutEnabled && now < deafenUntil
-        let shouldAttemptTrigger = !isCapturing && curvedLevel > dynamicThreshold && levelRise > triggerRise
+        let triggerThreshold = echoActive ? dynamicThreshold : gateThreshold
+        let shouldAttemptTrigger = !isCapturing && curvedLevel > triggerThreshold && levelRise > triggerRise
         if shouldAttemptTrigger {
             if withinDeafen {
                 lastBlockReason = "Blocked (deafen)"
