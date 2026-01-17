@@ -57,10 +57,15 @@ struct HighContrastMobileView: View {
     private let maxVelocity: CGFloat = 900  // Cap velocity to keep things playable
     private let collisionRestitution: CGFloat = 0.9
     private let collisionCooldown: TimeInterval = 0.12
-    private let inertialAccelerationScale: CGFloat = 5200
+    private let wallAccelerationScale: CGFloat = 2200
+    private let wallReturnStrength: CGFloat = 12
+    private let wallDamping: CGFloat = 0.92
+    private let wallOffsetLimitRatio: CGFloat = 0.12
     private let inertialAccelerationThreshold: CGFloat = 0.01
 
     @State private var lastCollisionTimes: [String: Date] = [:]
+    @State private var wallOffset: CGPoint = .zero
+    @State private var wallVelocity: CGPoint = .zero
 
     var body: some View {
         ZStack {
@@ -81,6 +86,8 @@ struct HighContrastMobileView: View {
                 .onAppear {
                     screenSize = geometry.size
                     initializeShapesIfNeeded(in: geometry.size)
+                    wallOffset = .zero
+                    wallVelocity = .zero
                     motionController.start()
                     chimePlayer.start(after: AudioHandoff.startDelay)
                 }
@@ -308,6 +315,10 @@ struct HighContrastMobileView: View {
             )
             shapes[index].position = clampedPosition(for: shapes[index], proposed: scaled, in: newSize)
         }
+
+        let maxWallOffset = min(newSize.width, newSize.height) * wallOffsetLimitRatio
+        wallOffset.x = wallOffset.x.clamped(to: -maxWallOffset...maxWallOffset)
+        wallOffset.y = wallOffset.y.clamped(to: -maxWallOffset...maxWallOffset)
     }
 
     private func updatePhysics(at date: Date) {
@@ -332,18 +343,30 @@ struct HighContrastMobileView: View {
         if magnitude < inertialAccelerationThreshold {
             acceleration = .zero
         }
-        let inertialForce = CGPoint(
-            x: -acceleration.x * inertialAccelerationScale,
-            y: -acceleration.y * inertialAccelerationScale
+        let wallAcceleration = CGPoint(
+            x: -acceleration.x * wallAccelerationScale,
+            y: -acceleration.y * wallAccelerationScale
         )
+        let maxWallOffset = min(screenSize.width, screenSize.height) * wallOffsetLimitRatio
+
+        wallVelocity.x += wallAcceleration.x * CGFloat(dt)
+        wallVelocity.y += wallAcceleration.y * CGFloat(dt)
+
+        wallVelocity.x += -wallOffset.x * wallReturnStrength * CGFloat(dt)
+        wallVelocity.y += -wallOffset.y * wallReturnStrength * CGFloat(dt)
+
+        wallVelocity.x *= wallDamping
+        wallVelocity.y *= wallDamping
+
+        wallOffset.x += wallVelocity.x * CGFloat(dt)
+        wallOffset.y += wallVelocity.y * CGFloat(dt)
+        wallOffset.x = wallOffset.x.clamped(to: -maxWallOffset...maxWallOffset)
+        wallOffset.y = wallOffset.y.clamped(to: -maxWallOffset...maxWallOffset)
 
         for i in shapes.indices {
             if draggedShapeIndex == i || adjustingShapeIndex == i { continue }
 
             var shape = shapes[i]
-
-            shape.velocity.x += inertialForce.x * CGFloat(dt)
-            shape.velocity.y += inertialForce.y * CGFloat(dt)
 
             // Apply damping and ease back toward baseline speed
             shape.velocity.x *= damping
@@ -373,6 +396,11 @@ struct HighContrastMobileView: View {
     }
 
     private func resolveWallCollisions() {
+        let wallBounds = CGRect(x: wallOffset.x,
+                                y: wallOffset.y,
+                                width: screenSize.width,
+                                height: screenSize.height)
+        let wallVelocity = self.wallVelocity
         for index in shapes.indices {
             let isDragged = draggedShapeIndex == index
             let isAdjusting = adjustingShapeIndex == index
@@ -380,23 +408,22 @@ struct HighContrastMobileView: View {
             var velocity = isDragged ? dragVelocity : shape.velocity
             var didHitWall = false
             let bounds = polygonBounds(worldContour(for: shape))
-            let wallBounds = CGRect(origin: .zero, size: screenSize)
             var impactSpeed: CGFloat = 0
 
             var offset = CGPoint.zero
             if bounds.minX < wallBounds.minX {
                 offset.x = wallBounds.minX - bounds.minX
-                let relative = velocity.x
+                let relative = velocity.x - wallVelocity.x
                 if relative < 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.x = isDragged || isAdjusting ? 0 : wallVelocity.x - relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
             } else if bounds.maxX > wallBounds.maxX {
                 offset.x = wallBounds.maxX - bounds.maxX
-                let relative = velocity.x
+                let relative = velocity.x - wallVelocity.x
                 if relative > 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.x = isDragged || isAdjusting ? 0 : wallVelocity.x - relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
@@ -404,17 +431,17 @@ struct HighContrastMobileView: View {
 
             if bounds.minY < wallBounds.minY {
                 offset.y = wallBounds.minY - bounds.minY
-                let relative = velocity.y
+                let relative = velocity.y - wallVelocity.y
                 if relative < 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.y = isDragged || isAdjusting ? 0 : wallVelocity.y - relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
             } else if bounds.maxY > wallBounds.maxY {
                 offset.y = wallBounds.maxY - bounds.maxY
-                let relative = velocity.y
+                let relative = velocity.y - wallVelocity.y
                 if relative > 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
+                    velocity.y = isDragged || isAdjusting ? 0 : wallVelocity.y - relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }

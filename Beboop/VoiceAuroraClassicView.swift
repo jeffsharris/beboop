@@ -333,6 +333,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     private func configureAudioSession(_ session: AVAudioSession) throws {
         try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
         try session.setMode(.voiceChat)
+        try session.setPreferredInputNumberOfChannels(1)
         try session.setActive(true)
 
         let usesReceiver = session.currentRoute.outputs.contains { $0.portType == .builtInReceiver }
