@@ -451,12 +451,21 @@ final class AudioManager: NSObject, ObservableObject {
     }
 
     private func buffer(for tileIndex: Int) -> AVAudioPCMBuffer? {
+        if isRecording, currentRecordingTile == tileIndex {
+            return nil
+        }
+
         if let cached = buffers[tileIndex] {
             return cached
         }
 
         let url = audioFileURL(for: tileIndex)
         guard fileManager.fileExists(atPath: url.path) else {
+            return nil
+        }
+        if let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+           let size = attributes[.size] as? NSNumber,
+           size.intValue == 0 {
             return nil
         }
 
