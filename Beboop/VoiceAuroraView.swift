@@ -654,8 +654,14 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             }
 
             let input = try AVCaptureDeviceInput(device: device)
-            if input.isMultichannelAudioModeSupported {
-                input.multichannelAudioMode = .firstOrderAmbisonics
+            var selectedMode: AVCaptureMultichannelAudioMode?
+            if input.isMultichannelAudioModeSupported(.firstOrderAmbisonics) {
+                selectedMode = .firstOrderAmbisonics
+            } else if input.isMultichannelAudioModeSupported(.stereo) {
+                selectedMode = .stereo
+            }
+            if let selectedMode {
+                input.multichannelAudioMode = selectedMode
             } else {
                 print("Multichannel audio mode not supported on this device")
             }
@@ -666,7 +672,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             sessionCapture.addInput(input)
 
             let output = AVCaptureAudioDataOutput()
-            output.spatialAudioChannelLayoutTag = foaLayoutTag
+            if selectedMode == .firstOrderAmbisonics {
+                output.spatialAudioChannelLayoutTag = foaLayoutTag
+            }
             output.setSampleBufferDelegate(self, queue: captureQueue)
             guard sessionCapture.canAddOutput(output) else {
                 print("Unable to add audio capture output")
@@ -1161,24 +1169,23 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
         let bufferList = UnsafeMutableAudioBufferListPointer(audioBufferList)
         let sampleRate = asbd.pointee.mSampleRate
         guard sampleRate > 0 else { return }
-        guard channelCount >= 4 else { return }
+        guard channelCount > 0 else { return }
 
         if isFloat {
             if isNonInterleaved {
-                guard bufferList.count >= 4,
-                      let w = bufferList[0].mData?.assumingMemoryBound(to: Float.self),
-                      let y = bufferList[1].mData?.assumingMemoryBound(to: Float.self),
-                      let z = bufferList[2].mData?.assumingMemoryBound(to: Float.self),
-                      let x = bufferList[3].mData?.assumingMemoryBound(to: Float.self) else {
+                guard let w = bufferList.first?.mData?.assumingMemoryBound(to: Float.self) else {
                     return
                 }
+                let y = bufferList.count > 1 ? bufferList[1].mData?.assumingMemoryBound(to: Float.self) : nil
+                let z = bufferList.count > 2 ? bufferList[2].mData?.assumingMemoryBound(to: Float.self) : nil
+                let x = bufferList.count > 3 ? bufferList[3].mData?.assumingMemoryBound(to: Float.self) : nil
 
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return w[index]
-                    case 1: return y[index]
-                    case 2: return z[index]
-                    default: return x[index]
+                    case 1: return y?[index] ?? 0
+                    case 2: return z?[index] ?? 0
+                    default: return x?[index] ?? 0
                     }
                 }
             } else {
@@ -1188,26 +1195,25 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
                 }
 
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
-                    data[index * channelCount + channel]
+                    channel < channelCount ? data[index * channelCount + channel] : 0
                 }
             }
         } else if asbd.pointee.mBitsPerChannel == 16 {
             if isNonInterleaved {
-                guard bufferList.count >= 4,
-                      let w = bufferList[0].mData?.assumingMemoryBound(to: Int16.self),
-                      let y = bufferList[1].mData?.assumingMemoryBound(to: Int16.self),
-                      let z = bufferList[2].mData?.assumingMemoryBound(to: Int16.self),
-                      let x = bufferList[3].mData?.assumingMemoryBound(to: Int16.self) else {
+                guard let w = bufferList.first?.mData?.assumingMemoryBound(to: Int16.self) else {
                     return
                 }
+                let y = bufferList.count > 1 ? bufferList[1].mData?.assumingMemoryBound(to: Int16.self) : nil
+                let z = bufferList.count > 2 ? bufferList[2].mData?.assumingMemoryBound(to: Int16.self) : nil
+                let x = bufferList.count > 3 ? bufferList[3].mData?.assumingMemoryBound(to: Int16.self) : nil
 
                 let scale = 1.0 / Float(Int16.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return Float(w[index]) * scale
-                    case 1: return Float(y[index]) * scale
-                    case 2: return Float(z[index]) * scale
-                    default: return Float(x[index]) * scale
+                    case 1: return Float(y?[index] ?? 0) * scale
+                    case 2: return Float(z?[index] ?? 0) * scale
+                    default: return Float(x?[index] ?? 0) * scale
                     }
                 }
             } else {
@@ -1218,26 +1224,25 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
 
                 let scale = 1.0 / Float(Int16.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
-                    Float(data[index * channelCount + channel]) * scale
+                    channel < channelCount ? Float(data[index * channelCount + channel]) * scale : 0
                 }
             }
         } else if asbd.pointee.mBitsPerChannel == 32 {
             if isNonInterleaved {
-                guard bufferList.count >= 4,
-                      let w = bufferList[0].mData?.assumingMemoryBound(to: Int32.self),
-                      let y = bufferList[1].mData?.assumingMemoryBound(to: Int32.self),
-                      let z = bufferList[2].mData?.assumingMemoryBound(to: Int32.self),
-                      let x = bufferList[3].mData?.assumingMemoryBound(to: Int32.self) else {
+                guard let w = bufferList.first?.mData?.assumingMemoryBound(to: Int32.self) else {
                     return
                 }
+                let y = bufferList.count > 1 ? bufferList[1].mData?.assumingMemoryBound(to: Int32.self) : nil
+                let z = bufferList.count > 2 ? bufferList[2].mData?.assumingMemoryBound(to: Int32.self) : nil
+                let x = bufferList.count > 3 ? bufferList[3].mData?.assumingMemoryBound(to: Int32.self) : nil
 
                 let scale = 1.0 / Float(Int32.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return Float(w[index]) * scale
-                    case 1: return Float(y[index]) * scale
-                    case 2: return Float(z[index]) * scale
-                    default: return Float(x[index]) * scale
+                    case 1: return Float(y?[index] ?? 0) * scale
+                    case 2: return Float(z?[index] ?? 0) * scale
+                    default: return Float(x?[index] ?? 0) * scale
                     }
                 }
             } else {
@@ -1248,7 +1253,7 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
 
                 let scale = 1.0 / Float(Int32.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
-                    Float(data[index * channelCount + channel]) * scale
+                    channel < channelCount ? Float(data[index * channelCount + channel]) * scale : 0
                 }
             }
         }
