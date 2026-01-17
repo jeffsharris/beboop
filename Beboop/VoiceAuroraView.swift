@@ -1,5 +1,8 @@
 import SwiftUI
 import AVFoundation
+#if canImport(AVFAudio)
+import AVFAudio
+#endif
 import CoreAudioTypes
 import CoreMedia
 
