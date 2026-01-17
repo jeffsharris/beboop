@@ -3,6 +3,7 @@ import AVFoundation
 #if canImport(AVFAudio)
 import AVFAudio
 #endif
+import AudioToolbox
 import CoreAudioTypes
 import CoreMedia
 
@@ -593,7 +594,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var gateMixer: AVAudioMixerNode?
     private var delayNode: AVAudioUnitDelay?
     private var boostNode: AVAudioUnitEQ?
-    private var limiterNode: AVAudioUnitDynamicsProcessor?
+    private var limiterNode: AVAudioUnitEffect?
     private var playbackFormat: AVAudioFormat?
     private var isListening = false
     private var levelHistory: [Float] = []
@@ -710,12 +711,29 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         delayNode?.feedback = echoFeedback.clamped(to: -100.0...100.0)
         delayNode?.lowPassCutoff = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
         boostNode?.globalGain = echoBoostDb.clamped(to: -96.0...24.0)
+        if let limiterNode {
+            configureLimiter(limiterNode)
+        }
+    }
 
-        limiterNode?.threshold = -10
-        limiterNode?.headRoom = 3
-        limiterNode?.attackTime = 0.001
-        limiterNode?.releaseTime = 0.06
-        limiterNode?.masterGain = 0
+    private func makeLimiter() -> AVAudioUnitEffect {
+        let description = AudioComponentDescription(componentType: kAudioUnitType_Effect,
+                                                    componentSubType: kAudioUnitSubType_DynamicsProcessor,
+                                                    componentManufacturer: kAudioUnitManufacturer_Apple,
+                                                    componentFlags: 0,
+                                                    componentFlagsMask: 0)
+        let limiter = AVAudioUnitEffect(audioComponentDescription: description)
+        configureLimiter(limiter)
+        return limiter
+    }
+
+    private func configureLimiter(_ limiter: AVAudioUnitEffect) {
+        let unit = limiter.audioUnit
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_Threshold, kAudioUnitScope_Global, 0, -10, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_HeadRoom, kAudioUnitScope_Global, 0, 3, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_AttackTime, kAudioUnitScope_Global, 0, 0.001, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_ReleaseTime, kAudioUnitScope_Global, 0, 0.060, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_OverallGain, kAudioUnitScope_Global, 0, 0, 0)
     }
 
     func startListening(after delay: TimeInterval = 0) {
@@ -899,7 +917,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
         let boost = AVAudioUnitEQ(numberOfBands: 1)
 
-        let limiter = AVAudioUnitDynamicsProcessor()
+        let limiter = makeLimiter()
 
         engine.attach(player)
         engine.attach(gateMixer)
