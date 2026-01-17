@@ -429,8 +429,14 @@ struct SoundTileView: View {
 
     private func scheduleRecordingStart() {
         cancelRecordingStart()
+        let recordingWasActive = audioManager.isRecording
         let workItem = DispatchWorkItem {
-            guard isPressed && !isRecording && !hasRecording && !showBack else { return }
+            guard isPressed,
+                  !isRecording,
+                  !hasRecording,
+                  !showBack,
+                  !recordingWasActive,
+                  !audioManager.isRecording else { return }
             onStartRecording()
             recordingStartWorkItem = nil
         }
