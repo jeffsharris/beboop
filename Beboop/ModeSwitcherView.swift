@@ -107,6 +107,7 @@ struct ModeSwitcherView: View {
 
                 ForEach(AppMode.allCases) { mode in
                     Button {
+                        AudioHandoff.notifyStop()
                         storedMode = mode.rawValue
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isMenuPresented = false

@@ -57,15 +57,8 @@ struct HighContrastMobileView: View {
     private let maxVelocity: CGFloat = 900  // Cap velocity to keep things playable
     private let collisionRestitution: CGFloat = 0.9
     private let collisionCooldown: TimeInterval = 0.12
-    private let wallAccelerationScale: CGFloat = 1400
-    private let wallVelocityDamping: CGFloat = 0.9
-    private let wallVelocityMax: CGFloat = 600
-    private let wallOffsetMax: CGFloat = 28
-    private let wallAccelerationThreshold: CGFloat = 0.03
-    private let wallOffsetDamping: CGFloat = 0.92
-
-    @State private var wallVelocity: CGPoint = .zero
-    @State private var wallOffset: CGPoint = .zero
+    private let inertialAccelerationScale: CGFloat = 1400
+    private let inertialAccelerationThreshold: CGFloat = 0.03
 
     @State private var lastCollisionTimes: [String: Date] = [:]
 
@@ -89,6 +82,7 @@ struct HighContrastMobileView: View {
                     screenSize = geometry.size
                     initializeShapesIfNeeded(in: geometry.size)
                     motionController.start()
+                    chimePlayer.start(after: AudioHandoff.startDelay)
                 }
                 .onChange(of: geometry.size) { _, newSize in
                     let oldSize = screenSize
@@ -98,6 +92,7 @@ struct HighContrastMobileView: View {
                 }
                 .onDisappear {
                     motionController.stop()
+                    chimePlayer.stop()
                 }
                 .gesture(combinedGesture)
             }
@@ -109,6 +104,9 @@ struct HighContrastMobileView: View {
                 onDoubleTap: handleTwoFingerDoubleTap
             )
             .ignoresSafeArea()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
+            chimePlayer.stop()
         }
     }
 
@@ -328,12 +326,24 @@ struct HighContrastMobileView: View {
             return
         }
 
-        updateWallMotion(dt: dt)
+        let orientation = currentInterfaceOrientation()
+        var acceleration = accelerationVector(from: motionController.latestAcceleration, orientation: orientation)
+        let magnitude = sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y)
+        if magnitude < inertialAccelerationThreshold {
+            acceleration = .zero
+        }
+        let inertialForce = CGPoint(
+            x: -acceleration.x * inertialAccelerationScale,
+            y: -acceleration.y * inertialAccelerationScale
+        )
 
         for i in shapes.indices {
             if draggedShapeIndex == i || adjustingShapeIndex == i { continue }
 
             var shape = shapes[i]
+
+            shape.velocity.x += inertialForce.x * CGFloat(dt)
+            shape.velocity.y += inertialForce.y * CGFloat(dt)
 
             // Apply damping and ease back toward baseline speed
             shape.velocity.x *= damping
@@ -370,27 +380,23 @@ struct HighContrastMobileView: View {
             var velocity = isDragged ? dragVelocity : shape.velocity
             var didHitWall = false
             let bounds = polygonBounds(worldContour(for: shape))
-            let wallBounds = currentWallBounds()
-            let wallVelocityLeft = max(wallVelocity.x, 0)
-            let wallVelocityRight = min(wallVelocity.x, 0)
-            let wallVelocityTop = max(wallVelocity.y, 0)
-            let wallVelocityBottom = min(wallVelocity.y, 0)
+            let wallBounds = CGRect(origin: .zero, size: screenSize)
             var impactSpeed: CGFloat = 0
 
             var offset = CGPoint.zero
             if bounds.minX < wallBounds.minX {
                 offset.x = wallBounds.minX - bounds.minX
-                let relative = velocity.x - wallVelocityLeft
+                let relative = velocity.x
                 if relative < 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : wallVelocityLeft - relative * collisionRestitution
+                    velocity.x = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
             } else if bounds.maxX > wallBounds.maxX {
                 offset.x = wallBounds.maxX - bounds.maxX
-                let relative = velocity.x - wallVelocityRight
+                let relative = velocity.x
                 if relative > 0 {
-                    velocity.x = isDragged || isAdjusting ? 0 : wallVelocityRight - relative * collisionRestitution
+                    velocity.x = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
@@ -398,17 +404,17 @@ struct HighContrastMobileView: View {
 
             if bounds.minY < wallBounds.minY {
                 offset.y = wallBounds.minY - bounds.minY
-                let relative = velocity.y - wallVelocityTop
+                let relative = velocity.y
                 if relative < 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : wallVelocityTop - relative * collisionRestitution
+                    velocity.y = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
             } else if bounds.maxY > wallBounds.maxY {
                 offset.y = wallBounds.maxY - bounds.maxY
-                let relative = velocity.y - wallVelocityBottom
+                let relative = velocity.y
                 if relative > 0 {
-                    velocity.y = isDragged || isAdjusting ? 0 : wallVelocityBottom - relative * collisionRestitution
+                    velocity.y = isDragged || isAdjusting ? 0 : -relative * collisionRestitution
                     didHitWall = true
                     impactSpeed = max(impactSpeed, abs(relative))
                 }
@@ -573,47 +579,6 @@ struct HighContrastMobileView: View {
             velocity.x *= scale
             velocity.y *= scale
         }
-    }
-
-    private func clampVector(_ vector: inout CGPoint, maxMagnitude: CGFloat) {
-        let speed = sqrt(vector.x * vector.x + vector.y * vector.y)
-        if speed > maxMagnitude {
-            let scale = maxMagnitude / speed
-            vector.x *= scale
-            vector.y *= scale
-        }
-    }
-
-    private func updateWallMotion(dt: TimeInterval) {
-        let orientation = currentInterfaceOrientation()
-        var acceleration = accelerationVector(from: motionController.latestAcceleration, orientation: orientation)
-        let magnitude = sqrt(acceleration.x * acceleration.x + acceleration.y * acceleration.y)
-        if magnitude < wallAccelerationThreshold {
-            acceleration = .zero
-        }
-
-        wallVelocity.x += acceleration.x * wallAccelerationScale * CGFloat(dt)
-        wallVelocity.y += acceleration.y * wallAccelerationScale * CGFloat(dt)
-        wallVelocity.x *= wallVelocityDamping
-        wallVelocity.y *= wallVelocityDamping
-        clampVector(&wallVelocity, maxMagnitude: wallVelocityMax)
-
-        wallOffset.x += wallVelocity.x * CGFloat(dt)
-        wallOffset.y += wallVelocity.y * CGFloat(dt)
-        wallOffset.x *= wallOffsetDamping
-        wallOffset.y *= wallOffsetDamping
-        wallOffset.x = wallOffset.x.clamped(to: -wallOffsetMax...wallOffsetMax)
-        wallOffset.y = wallOffset.y.clamped(to: -wallOffsetMax...wallOffsetMax)
-    }
-
-    private func currentWallBounds() -> CGRect {
-        let leftInset = max(0, wallOffset.x)
-        let rightInset = max(0, -wallOffset.x)
-        let topInset = max(0, wallOffset.y)
-        let bottomInset = max(0, -wallOffset.y)
-        let width = max(1, screenSize.width - leftInset - rightInset)
-        let height = max(1, screenSize.height - topInset - bottomInset)
-        return CGRect(x: leftInset, y: topInset, width: width, height: height)
     }
 
     private func accelerationVector(from acceleration: CMAcceleration,
@@ -1009,12 +974,58 @@ final class ChimePlayer: ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var sampler: AVAudioUnitSampler?
     private var isSetup = false
+    private var pendingStartWorkItem: DispatchWorkItem?
 
-    init() {
-        setupAudio()
+    func start(after delay: TimeInterval = 0) {
+        pendingStartWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.startNow()
+        }
+        pendingStartWorkItem = workItem
+
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        } else {
+            DispatchQueue.main.async(execute: workItem)
+        }
     }
 
-    private func setupAudio() {
+    func stop() {
+        pendingStartWorkItem?.cancel()
+        pendingStartWorkItem = nil
+
+        audioEngine?.stop()
+        audioEngine?.reset()
+        audioEngine = nil
+        sampler = nil
+        isSetup = false
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            print("Chime audio session deactivation failed: \(error)")
+        }
+    }
+
+    private func startNow() {
+        configureAudioSession()
+        setupAudioIfNeeded()
+    }
+
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.ambient, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            print("Chime audio session setup failed: \(error)")
+        }
+    }
+
+    private func setupAudioIfNeeded() {
+        guard !isSetup || audioEngine?.isRunning != true else { return }
+
         do {
             let engine = AVAudioEngine()
             let sampler = AVAudioUnitSampler()
@@ -1034,10 +1045,14 @@ final class ChimePlayer: ObservableObject {
             self.isSetup = true
         } catch {
             print("Chime audio setup failed: \(error)")
+            isSetup = false
         }
     }
 
     func playChime(note: UInt8, volume: Float) {
+        if !isSetup || audioEngine?.isRunning != true {
+            startNow()
+        }
         guard isSetup, let sampler = sampler else { return }
 
         let velocity = UInt8(min(127, max(30, volume * 100)))

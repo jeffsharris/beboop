@@ -20,6 +20,7 @@ final class AudioManager: NSObject, ObservableObject {
     private let fileManager = FileManager.default
     private var recordingStartDate: Date?
     private let minimumRecordingDuration: TimeInterval = 0.5
+    private var pendingActivationWorkItem: DispatchWorkItem?
 
     @Published var isRecording = false
     @Published var currentRecordingTile: Int?
@@ -55,10 +56,44 @@ final class AudioManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        setupAudioSession()
     }
 
-    private func setupAudioSession() {
+    func activate(after delay: TimeInterval = 0) {
+        pendingActivationWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.activateNow()
+        }
+        pendingActivationWorkItem = workItem
+
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        } else {
+            DispatchQueue.main.async(execute: workItem)
+        }
+    }
+
+    func deactivate() {
+        pendingActivationWorkItem?.cancel()
+        pendingActivationWorkItem = nil
+        stopRecording()
+        stopAllPlayback()
+        engine.stop()
+        engine.reset()
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            print("Audio session deactivation failed: \(error)")
+        }
+    }
+
+    private func activateNow() {
+        configureAudioSession()
+    }
+
+    private func configureAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers])
@@ -71,6 +106,7 @@ final class AudioManager: NSObject, ObservableObject {
     private func ensureEngineRunning() {
         guard !engine.isRunning else { return }
         do {
+            configureAudioSession()
             try engine.start()
         } catch {
             print("Audio engine failed to restart: \(error)")
@@ -93,6 +129,7 @@ final class AudioManager: NSObject, ObservableObject {
 
     private func beginRecording(for tileIndex: Int) {
         stopRecording()
+        configureAudioSession()
 
         let url = audioFileURL(for: tileIndex)
 
@@ -251,6 +288,20 @@ final class AudioManager: NSObject, ObservableObject {
             fallbackPlayers[tileIndex] = nil
             stopFallbackMetering(for: tileIndex)
         }
+    }
+
+    private func stopAllPlayback() {
+        let activeTiles = Set(playbackChains.keys)
+            .union(fallbackPlayers.keys)
+            .union(loopingTiles)
+            .union(activeTaps)
+
+        for tileIndex in activeTiles {
+            stopPlayback(for: tileIndex)
+        }
+
+        activeTaps.removeAll()
+        playbackLevels.removeAll()
     }
 
     func hasRecording(for tileIndex: Int) -> Bool {

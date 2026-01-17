@@ -44,9 +44,12 @@ struct VoiceAuroraClassicView: View {
             .ignoresSafeArea()
         }
         .onAppear {
-            audioProcessor.startListening()
+            audioProcessor.startListening(after: AudioHandoff.startDelay)
         }
         .onDisappear {
+            audioProcessor.stopListening()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
             audioProcessor.stopListening()
         }
     }
@@ -224,6 +227,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     private var levelHistory: [Float] = []
     private let levelHistorySize = 8
     private var echoMix: Float = 0
+    private var pendingStartWorkItem: DispatchWorkItem?
 
     private let echoGateThreshold: Float = 0.1
     private let echoGateAttack: Float = 0.75
@@ -232,7 +236,22 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     private let echoWetMixRange: Float = 15
     private let echoBoostDb: Float = 18
 
-    func startListening() {
+    func startListening(after delay: TimeInterval = 0) {
+        pendingStartWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.startListeningNow()
+        }
+        pendingStartWorkItem = workItem
+
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        } else {
+            DispatchQueue.main.async(execute: workItem)
+        }
+    }
+
+    private func startListeningNow() {
         guard !isListening else { return }
 
         AVAudioApplication.requestRecordPermission { [weak self] granted in
@@ -247,6 +266,8 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     func stopListening() {
+        pendingStartWorkItem?.cancel()
+        pendingStartWorkItem = nil
         isListening = false
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)

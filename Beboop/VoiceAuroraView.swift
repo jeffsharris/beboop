@@ -61,9 +61,12 @@ struct VoiceAuroraView: View {
             }
         }
         .onAppear {
-            audioProcessor.startListening()
+            audioProcessor.startListening(after: AudioHandoff.startDelay)
         }
         .onDisappear {
+            audioProcessor.stopListening()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
             audioProcessor.stopListening()
         }
     }
@@ -922,6 +925,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var duckingLevel: Float = 1.0
     private var lastCurvedLevel: Float = 0
     private var lastEchoTriggerTime: Double = 0
+    private var pendingStartWorkItem: DispatchWorkItem?
 
     override init() {
         super.init()
@@ -1023,7 +1027,22 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         return number.boolValue
     }
 
-    func startListening() {
+    func startListening(after delay: TimeInterval = 0) {
+        pendingStartWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.startListeningNow()
+        }
+        pendingStartWorkItem = workItem
+
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        } else {
+            DispatchQueue.main.async(execute: workItem)
+        }
+    }
+
+    private func startListeningNow() {
         guard !isListening else { return }
 
         AVAudioApplication.requestRecordPermission { [weak self] granted in
@@ -1038,6 +1057,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     func stopListening() {
+        pendingStartWorkItem?.cancel()
+        pendingStartWorkItem = nil
         isListening = false
         captureOutput?.setSampleBufferDelegate(nil, queue: nil)
         captureSession?.stopRunning()

@@ -88,6 +88,15 @@ struct ContentView: View {
                 ShareSheet(items: [url])
             }
         }
+        .onAppear {
+            audioManager.activate(after: AudioHandoff.startDelay)
+        }
+        .onDisappear {
+            audioManager.deactivate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
+            audioManager.deactivate()
+        }
     }
 
     private func refreshTileStates() {
