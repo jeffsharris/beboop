@@ -29,13 +29,13 @@ enum AppMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .cozyCoos:
-            return "Cozy Coos"
+            return "Cozy Cues"
         case .driftDoodles:
             return "Drift Doodles"
         case .voiceAurora:
-            return "Spatial Voice"
-        case .voiceAuroraClassic:
             return "Aurora Voice"
+        case .voiceAuroraClassic:
+            return "Aurora Voice (Legacy)"
         }
     }
 
@@ -50,6 +50,10 @@ enum AppMode: String, CaseIterable, Identifiable {
         case .voiceAuroraClassic:
             return "circle"
         }
+    }
+
+    static var menuCases: [AppMode] {
+        [.cozyCoos, .driftDoodles, .voiceAurora]
     }
 }
 

@@ -3,7 +3,6 @@ import SwiftUI
 struct ModeSwitcherView: View {
     @EnvironmentObject private var audioCoordinator: AudioCoordinator
     @AppStorage("lastActiveMode") private var storedMode = AppMode.cozyCoos.rawValue
-    @AppStorage("echoLab.presented") private var isEchoLabPresented = false
     @State private var isMenuPresented = false
 
     var body: some View {
@@ -18,13 +17,13 @@ struct ModeSwitcherView: View {
             }
         }
         .onAppear {
+            if storedMode == AppMode.voiceAuroraClassic.rawValue {
+                storedMode = AppMode.voiceAurora.rawValue
+            }
             audioCoordinator.requestMode(activeMode)
         }
         .onChange(of: activeMode) { _, newMode in
             audioCoordinator.requestMode(newMode)
-            if newMode != .voiceAurora {
-                isEchoLabPresented = false
-            }
         }
     }
 
@@ -35,10 +34,8 @@ struct ModeSwitcherView: View {
             ContentView()
         case .driftDoodles:
             HighContrastMobileView()
-        case .voiceAurora:
+        case .voiceAurora, .voiceAuroraClassic:
             VoiceAuroraView()
-        case .voiceAuroraClassic:
-            VoiceAuroraClassicView()
         }
     }
 
@@ -81,7 +78,7 @@ struct ModeSwitcherView: View {
                     .font(.headline)
                     .foregroundColor(.primary)
 
-                ForEach(AppMode.allCases) { mode in
+                ForEach(AppMode.menuCases) { mode in
                     Button {
                         storedMode = mode.rawValue
                         withAnimation(.easeInOut(duration: 0.2)) {
@@ -106,34 +103,6 @@ struct ModeSwitcherView: View {
                     }
                     .buttonStyle(.plain)
                 }
-
-#if DEBUG
-                if activeMode == .voiceAurora {
-                    Button {
-                        isEchoLabPresented = true
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isMenuPresented = false
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 18, weight: .semibold))
-                                .frame(width: 28)
-                            Text("Echo Lab")
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                            Spacer()
-                        }
-                        .foregroundColor(.primary)
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.white.opacity(0.6))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-#endif
             }
             .padding(24)
             .background(

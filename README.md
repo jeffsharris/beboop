@@ -79,6 +79,7 @@ After this, pushes with the flag will build and upload a new TestFlight build.
 ## Notes
 - `fastlane match appstore` only needs to run locally when you create or renew signing assets.
 - Update the version in `Beboop/Info.plist` when shipping meaningful milestones.
+- Aurora Voice audio notes and tuning workflow live in `docs/voice-aurora.md`.
 
 ## Troubleshooting
 - **Invalid bundle / missing executable**: ensure `CFBundleExecutable` exists in `Beboop/Info.plist`.

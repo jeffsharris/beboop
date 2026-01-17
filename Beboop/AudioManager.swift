@@ -26,6 +26,10 @@ final class AudioManager: NSObject, ObservableObject {
     @Published var currentRecordingTile: Int?
     @Published var playbackSpeeds: [Int: Float] = [:]
     @Published var playbackLevels: [Int: Float] = [:]
+    @Published var playbackProgress: [Int: Double] = [:]
+
+    private var playbackStartTimes: [Int: Date] = [:]
+    private var waveformCache: [Int: [Float]] = [:]
 
     // Speed limits and allowed values
     static let minSpeed: Float = 0.1
@@ -169,6 +173,7 @@ final class AudioManager: NSObject, ObservableObject {
 
         if let tileIndex = recordedTile {
             buffers[tileIndex] = nil
+            waveformCache[tileIndex] = nil
 
             if recordingDuration < minimumRecordingDuration {
                 let url = audioFileURL(for: tileIndex)
@@ -210,13 +215,14 @@ final class AudioManager: NSObject, ObservableObject {
         }
         chain.player.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
             DispatchQueue.main.async {
-                self?.stopPlayback(for: tileIndex)
+                self?.stopPlayback(for: tileIndex, didFinish: true)
             }
         }
         if !chain.player.isPlaying {
             chain.player.play()
         }
 
+        playbackStartTimes[tileIndex] = Date()
         startMetering(for: tileIndex, on: chain.mixer)
 
         let generator = UIImpactFeedbackGenerator(style: .soft)
@@ -242,6 +248,7 @@ final class AudioManager: NSObject, ObservableObject {
             return
         }
         loopingTiles.insert(tileIndex)
+        playbackStartTimes[tileIndex] = Date()
         scheduleLoop(for: tileIndex, buffer: buffer, chain: chain)
     }
 
@@ -264,7 +271,7 @@ final class AudioManager: NSObject, ObservableObject {
                 if self.loopingTiles.contains(tileIndex) {
                     self.scheduleLoop(for: tileIndex, buffer: buffer, chain: chain)
                 } else {
-                    self.stopPlayback(for: tileIndex)
+                    self.stopPlayback(for: tileIndex, didFinish: true)
                 }
             }
         }
@@ -277,16 +284,16 @@ final class AudioManager: NSObject, ObservableObject {
         startMetering(for: tileIndex, on: chain.mixer)
     }
 
-    private func stopPlayback(for tileIndex: Int) {
+    private func stopPlayback(for tileIndex: Int, didFinish: Bool = false) {
         loopingTiles.remove(tileIndex)
         if let chain = playbackChains[tileIndex] {
             chain.player.stop()
-            stopMetering(for: tileIndex, on: chain.mixer)
+            stopMetering(for: tileIndex, on: chain.mixer, didFinish: didFinish)
         }
         if let fallback = fallbackPlayers[tileIndex] {
             fallback.stop()
             fallbackPlayers[tileIndex] = nil
-            stopFallbackMetering(for: tileIndex)
+            stopFallbackMetering(for: tileIndex, didFinish: didFinish)
         }
     }
 
@@ -363,7 +370,9 @@ final class AudioManager: NSObject, ObservableObject {
 
         playbackSpeeds[tileIndex] = nil
         playbackLevels[tileIndex] = nil
+        playbackProgress[tileIndex] = nil
         buffers[tileIndex] = nil
+        waveformCache[tileIndex] = nil
 
         let url = audioFileURL(for: tileIndex)
 
@@ -399,7 +408,7 @@ final class AudioManager: NSObject, ObservableObject {
         }
 
         if let existing = playbackChains[tileIndex] {
-            stopMetering(for: tileIndex, on: existing.mixer)
+            stopMetering(for: tileIndex, on: existing.mixer, didFinish: false)
             engine.detach(existing.player)
             engine.detach(existing.timePitch)
             engine.detach(existing.mixer)
@@ -482,7 +491,7 @@ final class AudioManager: NSObject, ObservableObject {
     // MARK: - Metering
 
     private func startMetering(for tileIndex: Int, on node: AVAudioNode) {
-        stopMetering(for: tileIndex, on: node)
+        removeTap(for: tileIndex, on: node)
 
         let format = node.outputFormat(forBus: 0)
         node.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
@@ -490,18 +499,44 @@ final class AudioManager: NSObject, ObservableObject {
             let level = self.rmsLevel(from: buffer)
             DispatchQueue.main.async {
                 self.playbackLevels[tileIndex] = level
+                self.updatePlaybackProgress(for: tileIndex)
             }
         }
 
         activeTaps.insert(tileIndex)
     }
 
-    private func stopMetering(for tileIndex: Int, on node: AVAudioNode) {
+    private func removeTap(for tileIndex: Int, on node: AVAudioNode) {
         if activeTaps.contains(tileIndex) {
             node.removeTap(onBus: 0)
             activeTaps.remove(tileIndex)
         }
+    }
+
+    private func updatePlaybackProgress(for tileIndex: Int) {
+        guard let startTime = playbackStartTimes[tileIndex],
+              let totalDuration = duration(for: tileIndex),
+              totalDuration > 0 else {
+            return
+        }
+
+        let speed = Double(playbackSpeeds[tileIndex] ?? Self.defaultSpeed)
+        let elapsed = Date().timeIntervalSince(startTime) * speed
+        let progress = loopingTiles.contains(tileIndex)
+            ? elapsed.truncatingRemainder(dividingBy: totalDuration) / totalDuration
+            : min(1.0, elapsed / totalDuration)
+
+        playbackProgress[tileIndex] = progress
+    }
+
+    private func stopMetering(for tileIndex: Int, on node: AVAudioNode, didFinish: Bool) {
+        removeTap(for: tileIndex, on: node)
         playbackLevels[tileIndex] = 0
+        if didFinish {
+            playbackProgress[tileIndex] = 1.0
+        }
+        playbackProgress[tileIndex] = nil
+        playbackStartTimes[tileIndex] = nil
     }
 
     private func rmsLevel(from buffer: AVAudioPCMBuffer) -> Float {
@@ -540,13 +575,14 @@ final class AudioManager: NSObject, ObservableObject {
             player.play()
 
             fallbackPlayers[tileIndex] = player
-            startFallbackMetering(for: tileIndex, player: player)
+            playbackStartTimes[tileIndex] = Date()
+            startFallbackMetering(for: tileIndex, player: player, loop: loop)
         } catch {
             print("Fallback playback failed: \(error)")
         }
     }
 
-    private func startFallbackMetering(for tileIndex: Int, player: AVAudioPlayer) {
+    private func startFallbackMetering(for tileIndex: Int, player: AVAudioPlayer, loop: Bool) {
         stopFallbackMetering(for: tileIndex)
 
         let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self, weak player] _ in
@@ -556,7 +592,7 @@ final class AudioManager: NSObject, ObservableObject {
             }
 
             guard player.isPlaying else {
-                self.stopFallbackMetering(for: tileIndex)
+                self.stopFallbackMetering(for: tileIndex, didFinish: !loop)
                 self.fallbackPlayers[tileIndex] = nil
                 return
             }
@@ -566,14 +602,86 @@ final class AudioManager: NSObject, ObservableObject {
             let linear = pow(10.0, power / 20.0)
             let normalized = min(1.0, max(0.0, (linear - 0.02) / 0.98))
             self.playbackLevels[tileIndex] = Float(normalized)
+
+            // Update playback progress
+            let duration = player.duration
+            if duration > 0 {
+                let currentTime = player.currentTime
+                let progress = loop
+                    ? currentTime.truncatingRemainder(dividingBy: duration) / duration
+                    : min(1.0, currentTime / duration)
+                self.playbackProgress[tileIndex] = progress
+            }
         }
 
         fallbackMeterTimers[tileIndex] = timer
     }
 
-    private func stopFallbackMetering(for tileIndex: Int) {
+    private func stopFallbackMetering(for tileIndex: Int, didFinish: Bool = false) {
         fallbackMeterTimers[tileIndex]?.invalidate()
         fallbackMeterTimers[tileIndex] = nil
+        if didFinish {
+            playbackProgress[tileIndex] = 1.0
+        }
+        playbackProgress[tileIndex] = nil
+        playbackStartTimes[tileIndex] = nil
         playbackLevels[tileIndex] = 0
+    }
+
+    // MARK: - Waveform & Duration
+
+    /// Returns the duration of a recording in seconds
+    func duration(for tileIndex: Int) -> TimeInterval? {
+        guard let buffer = buffer(for: tileIndex) else { return nil }
+        let sampleRate = buffer.format.sampleRate
+        guard sampleRate > 0 else { return nil }
+        return TimeInterval(buffer.frameLength) / sampleRate
+    }
+
+    /// Returns normalized waveform samples (0.0-1.0) for generating visual representations.
+    /// The number of samples determines the resolution of the blob shape.
+    func waveformSamples(for tileIndex: Int, count: Int = 12) -> [Float]? {
+        if let cached = waveformCache[tileIndex], cached.count == count {
+            return cached
+        }
+
+        guard let buffer = buffer(for: tileIndex),
+              let channelData = buffer.floatChannelData else {
+            return nil
+        }
+
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0, count > 0 else { return nil }
+
+        let data = channelData.pointee
+        let samplesPerBucket = frameCount / count
+        var samples: [Float] = []
+
+        for bucket in 0..<count {
+            let start = bucket * samplesPerBucket
+            let end = min(start + samplesPerBucket, frameCount)
+
+            var sum: Float = 0
+            for frame in start..<end {
+                let value = data[frame]
+                sum += value * value
+            }
+            let rms = sqrt(sum / Float(end - start))
+            samples.append(rms)
+        }
+
+        // Normalize to 0-1 range
+        let maxSample = samples.max() ?? 1.0
+        if maxSample > 0 {
+            samples = samples.map { min(1.0, $0 / maxSample) }
+        }
+
+        waveformCache[tileIndex] = samples
+        return samples
+    }
+
+    /// Clears cached waveform data for a tile (call after recording)
+    func clearWaveformCache(for tileIndex: Int) {
+        waveformCache[tileIndex] = nil
     }
 }

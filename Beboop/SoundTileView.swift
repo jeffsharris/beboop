@@ -8,7 +8,14 @@ struct SoundTileView: View {
     let isRecording: Bool
     let playbackSpeed: Float
     let playbackLevel: Float
+    let waveformSamples: [Float]?
+    @ObservedObject var audioManager: AudioManager
     @Binding var activeBackIndex: Int?
+
+    /// Playback progress for this tile (0.0-1.0), observed directly from AudioManager
+    private var playbackProgress: Double? {
+        audioManager.playbackProgress[index]
+    }
     let onStartRecording: () -> Void
     let onStopRecording: () -> Void
     let onPlay: () -> Void
@@ -117,10 +124,21 @@ struct SoundTileView: View {
                     value: recordingPulse
                 )
         } else if hasRecording {
-            Image(systemName: "waveform")
-                .font(.system(size: size * 0.18, weight: .bold))
-                .foregroundColor(.white.opacity(0.9))
-                .scaleEffect(playBounce ? 1.2 : 1.0)
+            if let samples = waveformSamples, !samples.isEmpty {
+                AudioBlobView(
+                    samples: samples,
+                    playbackProgress: playbackProgress,
+                    color: color,
+                    size: size * 0.55
+                )
+                .scaleEffect(playBounce ? 1.15 : 1.0)
+            } else {
+                // Fallback to simple circle if no waveform data
+                Circle()
+                    .fill(Color.white.opacity(0.9))
+                    .frame(width: size * 0.15, height: size * 0.15)
+                    .scaleEffect(playBounce ? 1.2 : 1.0)
+            }
         } else {
             EmptyView()
         }

@@ -3,6 +3,7 @@ import AVFoundation
 import Foundation
 import CoreAudioTypes
 import CoreMedia
+import UIKit
 
 struct VoiceAuroraView: View {
     private enum Edge {
@@ -51,14 +52,18 @@ struct VoiceAuroraView: View {
             }
             .ignoresSafeArea()
         }
-#if DEBUG
+        .overlay(
+            TwoFingerTapOverlay {
+                isEchoLabPresented = true
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        )
         .sheet(isPresented: $isEchoLabPresented) {
             EchoLabView(audioProcessor: audioProcessor,
                         isPresented: $isEchoLabPresented)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-#endif
         .onAppear {
             audioCoordinator.register(mode: .voiceAurora,
                                       start: {
@@ -1991,6 +1996,49 @@ private final class AtomicFloat {
         let current = value
         lock.unlock()
         return current
+    }
+}
+
+private struct TwoFingerTapOverlay: UIViewRepresentable {
+    let onTap: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        let tap = UITapGestureRecognizer(target: context.coordinator,
+                                         action: #selector(Coordinator.handleTap))
+        tap.numberOfTouchesRequired = 2
+        tap.numberOfTapsRequired = 1
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesBegan = false
+        tap.delaysTouchesEnded = false
+        tap.delegate = context.coordinator
+        view.addGestureRecognizer(tap)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTap: onTap)
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let onTap: () -> Void
+
+        init(onTap: @escaping () -> Void) {
+            self.onTap = onTap
+        }
+
+        @objc func handleTap() {
+            onTap()
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
     }
 }
 
