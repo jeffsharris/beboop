@@ -11,11 +11,9 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let safeAreaInsets = geometry.safeAreaInsets
-            let fullWidth = geometry.size.width + safeAreaInsets.leading + safeAreaInsets.trailing
-            let fullHeight = geometry.size.height + safeAreaInsets.top + safeAreaInsets.bottom
-            let tileHeight = fullHeight / 5
-            let tileWidth = fullWidth / 2
+            let fullSize = geometry.size
+            let tileHeight = fullSize.height / 5
+            let tileWidth = fullSize.width / 2
             let columns = [
                 GridItem(.fixed(tileWidth), spacing: 0),
                 GridItem(.fixed(tileWidth), spacing: 0)
@@ -76,11 +74,10 @@ struct ContentView: View {
                         .id("\(index)-\(tileStates[index])-[\(refreshTrigger)]-\(audioManager.playbackSpeeds[index] ?? 1.0)")
                     }
                 }
-                .frame(width: fullWidth, height: fullHeight, alignment: .top)
-                .offset(x: -safeAreaInsets.leading, y: -safeAreaInsets.top)
-                .ignoresSafeArea(.container, edges: [.top, .bottom])
+                .frame(width: fullSize.width, height: fullSize.height, alignment: .top)
             }
         }
+        .ignoresSafeArea()
         .sheet(isPresented: $showShareSheet) {
             if let url = shareURL {
                 ShareSheet(items: [url])
