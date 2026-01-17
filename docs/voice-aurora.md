@@ -39,10 +39,11 @@ for Voice Aurora so future changes stay aligned with the experience.
   from re-arming the echo.
 - Keep `echoRetriggerInterval` longer than `echoDelayTime` to avoid the speaker
   echo re-triggering itself.
+- The gate holds open for `echoHoldDuration` so a full word gets into the delay
+  buffer before the gate closes.
 - `AVAudioUnitDelay` provides repeat spacing (`echoDelayTime`) and decay (`echoFeedback`).
 - `echoBoostDb` keeps the first echo strong.
-- Wet mix and boost are scaled by the gate/ducking mix so tails collapse quickly
-  when the gate closes.
+- Wet mix stays high (85–100) so delayed tails can finish even after the gate closes.
 - Ducking (`duckingStrength`, `duckingLevelScale`, `duckingResponse`) reduces echo
   when live speech is hot. `duckingDelay` preserves the initial hit before ducking
   engages.

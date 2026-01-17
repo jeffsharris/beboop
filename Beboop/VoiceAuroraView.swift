@@ -306,10 +306,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private let echoGateThreshold: Float = 0.1
     private let echoGateAttack: Float = 0.75
     private let echoGateRelease: Float = 0.8
-    private let echoWetMixBase: Float = 0
-    private let echoWetMixRange: Float = 100
+    private let echoWetMixBase: Float = 85
+    private let echoWetMixRange: Float = 15
     private let echoDelayTime: TimeInterval = 0.7
-    private let echoFeedback: Float = 14
+    private let echoFeedback: Float = 18
     private let echoLowPassCutoff: Float = 9000
     private let echoBoostDb: Float = 18
     private let duckingStrength: Float = 0.65
@@ -318,6 +318,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private let duckingDelay: CFTimeInterval = 0.12
     private let echoTriggerRise: Float = 0.02
     private let echoRetriggerInterval: CFTimeInterval = 1.0
+    private let echoHoldDuration: CFTimeInterval = 0.55
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
     private var duckingLevel: Float = 1.0
@@ -542,7 +543,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             lastEchoTriggerTime = now
         }
 
-        let targetEcho: Float = triggerEcho ? 1.0 : 0.0
+        let holdActive = now - lastEchoTriggerTime < echoHoldDuration
+        let targetEcho: Float = holdActive ? 1.0 : 0.0
         if targetEcho > echoMix {
             echoMix = echoMix * (1 - echoGateAttack) + targetEcho * echoGateAttack
         } else {
@@ -554,11 +556,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         duckingLevel = duckingLevel * (1 - duckingResponse) + duckingTarget * duckingResponse
 
         let duckedMix = echoMix * duckingLevel
-        let duckedGain = echoBoostDb * duckedMix
 
         gateMixer?.outputVolume = duckedMix
-        delayNode?.wetDryMix = echoWetMixBase + echoWetMixRange * duckedMix
-        boostNode?.globalGain = duckedGain
+        delayNode?.wetDryMix = echoWetMixBase + echoWetMixRange * echoMix
+        boostNode?.globalGain = echoBoostDb
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
