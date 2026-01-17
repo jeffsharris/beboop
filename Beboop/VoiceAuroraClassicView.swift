@@ -19,6 +19,7 @@ struct VoiceAuroraClassicView: View {
     @StateObject private var audioProcessor = ClassicAuroraAudioProcessor()
     @State private var waves: [Wave] = []
     @State private var lastWaveTime: Date = .distantPast
+    @State private var isTuningPresented = false
 
     private let waveCooldown: TimeInterval = 0.16
     private let waveMinLevel: Double = 0.08
@@ -27,21 +28,31 @@ struct VoiceAuroraClassicView: View {
     private let classicSourcePoint = CGPoint(x: 0.5, y: 0.85)
 
     var body: some View {
-        GeometryReader { _ in
-            TimelineView(.animation) { timeline in
-                Canvas { context, size in
-                    let currentTime = timeline.date.timeIntervalSinceReferenceDate
-                    let level = Double(audioProcessor.smoothedLevel)
-                    let pitch = Double(audioProcessor.dominantPitch)
+        GeometryReader { geometry in
+            let bottomInset = max(16, geometry.safeAreaInsets.bottom + 8)
 
-                    drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
-                    drawWaves(context: &context, size: size, time: currentTime)
+            ZStack {
+                TimelineView(.animation) { timeline in
+                    Canvas { context, size in
+                        let currentTime = timeline.date.timeIntervalSinceReferenceDate
+                        let level = Double(audioProcessor.smoothedLevel)
+                        let pitch = Double(audioProcessor.dominantPitch)
+
+                        drawWaterBackground(context: &context, size: size, time: currentTime, level: level, pitch: pitch)
+                        drawWaves(context: &context, size: size, time: currentTime)
+                    }
+                    .onChange(of: timeline.date) { _, newDate in
+                        updateWaves(at: newDate)
+                    }
                 }
-                .onChange(of: timeline.date) { _, newDate in
-                    updateWaves(at: newDate)
+                .ignoresSafeArea()
+
+                tuningButton(bottomInset: bottomInset)
+
+                if isTuningPresented {
+                    tuningPanel(bottomInset: bottomInset)
                 }
             }
-            .ignoresSafeArea()
         }
         .onAppear {
             audioProcessor.startListening()
@@ -210,11 +221,99 @@ struct VoiceAuroraClassicView: View {
         path.closeSubpath()
         return path
     }
+
+    private func tuningButton(bottomInset: CGFloat) -> some View {
+        VStack {
+            Spacer()
+            HStack {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isTuningPresented.toggle()
+                    }
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 4)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 18)
+                .padding(.bottom, bottomInset)
+                Spacer()
+            }
+        }
+    }
+
+    private func tuningPanel(bottomInset: CGFloat) -> some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Classic Echo")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isTuningPresented = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                sliderRow(title: "Output Level",
+                          value: Binding(
+                            get: { Double(audioProcessor.echoOutputLevel) },
+                            set: { audioProcessor.echoOutputLevel = Float($0) }
+                          ),
+                          range: 0...2,
+                          step: 0.05,
+                          format: "%.2f")
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, bottomInset)
+            .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func sliderRow(title: String,
+                           value: Binding<Double>,
+                           range: ClosedRange<Double>,
+                           step: Double,
+                           format: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.primary)
+                Spacer()
+                Text(String(format: format, value.wrappedValue))
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            Slider(value: value, in: range, step: step)
+        }
+    }
 }
 
 final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
+    @Published var echoOutputLevel: Float = 1.0
 
     private var audioEngine: AVAudioEngine?
     private var gateMixer: AVAudioMixerNode?
@@ -264,6 +363,10 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
             let engine = AVAudioEngine()
             let inputNode = engine.inputNode
             let format = inputNode.outputFormat(forBus: 0)
+            let tapFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                          sampleRate: format.sampleRate,
+                                          channels: format.channelCount,
+                                          interleaved: false) ?? format
 
             let gateMixer = AVAudioMixerNode()
             gateMixer.outputVolume = 0
@@ -285,7 +388,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
             engine.connect(delay, to: boost, format: format)
             engine.connect(boost, to: engine.mainMixerNode, format: format)
 
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [weak self] buffer, _ in
                 self?.processAudioBuffer(buffer)
             }
 
@@ -314,24 +417,37 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
-
         let frames = Int(buffer.frameLength)
         guard frames > 0 else { return }
 
-        let rms = rmsLevel(channelData[0], frames: frames)
+        var rms: Float = 0
+        var zeroCrossings = 0
+        if let channelData = buffer.floatChannelData {
+            rms = rmsLevel(channelData[0], frames: frames)
+            let data = channelData[0]
+            for i in 1..<frames {
+                let current = data[i]
+                let previous = data[i - 1]
+                if (current >= 0 && previous < 0) || (current < 0 && previous >= 0) {
+                    zeroCrossings += 1
+                }
+            }
+        } else if let channelData = buffer.int16ChannelData {
+            rms = rmsLevelInt16(channelData[0], frames: frames)
+            let data = channelData[0]
+            for i in 1..<frames {
+                let current = data[i]
+                let previous = data[i - 1]
+                if (current >= 0 && previous < 0) || (current < 0 && previous >= 0) {
+                    zeroCrossings += 1
+                }
+            }
+        } else {
+            return
+        }
+
         let normalizedLevel = min(1.0, rms * 8.0)
         let curvedLevel = pow(normalizedLevel, 0.7)
-
-        var zeroCrossings = 0
-        let data = channelData[0]
-        for i in 1..<frames {
-            let current = data[i]
-            let previous = data[i - 1]
-            if (current >= 0 && previous < 0) || (current < 0 && previous >= 0) {
-                zeroCrossings += 1
-            }
-        }
 
         let sampleRate = buffer.format.sampleRate
         let estimatedFreq = (Double(zeroCrossings) / 2.0) * sampleRate / Double(frames)
@@ -355,7 +471,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
             self.smoothedLevel = self.levelHistory.reduce(0, +) / Float(self.levelHistory.count)
             self.dominantPitch = self.dominantPitch * 0.85 + normalizedPitch * 0.15
 
-            self.gateMixer?.outputVolume = self.echoMix
+            self.gateMixer?.outputVolume = self.echoMix * self.echoOutputLevel
             self.delayNode?.wetDryMix = self.echoWetMixBase + self.echoWetMixRange * self.echoMix
         }
     }
@@ -364,6 +480,16 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         var sum: Float = 0
         for i in 0..<frames {
             let value = data[i]
+            sum += value * value
+        }
+        return sqrt(sum / Float(frames))
+    }
+
+    private func rmsLevelInt16(_ data: UnsafePointer<Int16>, frames: Int) -> Float {
+        var sum: Float = 0
+        let scale = 1.0 / Float(Int16.max)
+        for i in 0..<frames {
+            let value = Float(data[i]) * scale
             sum += value * value
         }
         return sqrt(sum / Float(frames))

@@ -102,6 +102,8 @@ Tuning notes:
   + `AVAudioSession` `.voiceChat`) to keep Apple’s echo cancellation and AGC active.
 - Waves always emanate from the bottom center, so there is no spatial direction
   logic in this mode.
+- A small "Classic Echo" panel (slider icon at bottom-left) exposes the output
+  multiplier for quick loudness tuning.
 
 ## Quick troubleshooting checklist
 
