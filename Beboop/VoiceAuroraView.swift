@@ -654,7 +654,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             }
 
             let input = try AVCaptureDeviceInput(device: device)
-            input.multichannelAudioMode = .firstOrderAmbisonics
+            if input.isMultichannelAudioModeSupported {
+                input.multichannelAudioMode = .firstOrderAmbisonics
+            } else {
+                print("Multichannel audio mode not supported on this device")
+            }
             guard sessionCapture.canAddInput(input) else {
                 print("Unable to add audio capture input")
                 return
