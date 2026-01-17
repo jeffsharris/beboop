@@ -861,9 +861,8 @@ private struct FrozenResizeOverlay: UIViewRepresentable {
     func makeUIView(context: Context) -> FrozenResizeView {
         let view = FrozenResizeView()
         view.backgroundColor = .clear
-        view.shouldReceiveTouch = { [weak context] point in
-            guard let context else { return false }
-            return context.coordinator.shouldHandle(point: point)
+        view.shouldReceiveTouch = { [weak coordinator = context.coordinator] point in
+            coordinator?.shouldHandle(point: point) ?? false
         }
 
         let panGesture = UIPanGestureRecognizer(target: context.coordinator,
@@ -878,9 +877,8 @@ private struct FrozenResizeOverlay: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: FrozenResizeView, context: Context) {
-        uiView.shouldReceiveTouch = { [weak context] point in
-            guard let context else { return false }
-            return context.coordinator.shouldHandle(point: point)
+        uiView.shouldReceiveTouch = { [weak coordinator = context.coordinator] point in
+            coordinator?.shouldHandle(point: point) ?? false
         }
     }
 
