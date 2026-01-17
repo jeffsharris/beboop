@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Foundation
 import CoreAudioTypes
 import CoreMedia
 
@@ -286,31 +287,31 @@ struct VoiceAuroraView: View {
 
 final class AuroraAudioProcessor: NSObject, ObservableObject {
     private enum EchoDefaults {
-        static let inputGain: Float = 8.0
-        static let inputCurve: Float = 0.7
-        static let inputFloor: Float = 0.08
-        static let gateThreshold: Float = 0.22
-        static let gateAttack: Float = 0.06
-        static let gateRelease: Float = 0.22
+        static let inputGain: Float = 12.0
+        static let inputCurve: Float = 1.4
+        static let inputFloor: Float = 0.14
+        static let gateThreshold: Float = 0.48
+        static let gateAttack: Float = 0.05
+        static let gateRelease: Float = 0.25
         static let masterOutput: Float = 0.55
         static let outputRatio: Float = 0.65
         static let wetOnly: Bool = true
-        static let wetMixBase: Float = 0
-        static let wetMixRange: Float = 85
-        static let delayTime: Double = 0.28
-        static let feedback: Float = 48
-        static let lowPassCutoff: Float = 6000
-        static let boostDb: Float = 3
-        static let duckingStrength: Float = 0.65
-        static let duckingResponse: Float = 0.05
-        static let duckingLevelScale: Float = 1.0
-        static let duckingDelay: Double = 0.0
-        static let triggerRise: Float = 0.08
-        static let retriggerInterval: Double = 2.6
-        static let holdDuration: Double = 0.35
+        static let wetMixBase: Float = 6
+        static let wetMixRange: Float = 62
+        static let delayTime: Double = 0.33
+        static let feedback: Float = 50
+        static let lowPassCutoff: Float = 5500
+        static let boostDb: Float = 0
+        static let duckingStrength: Float = 0.75
+        static let duckingResponse: Float = 0.06
+        static let duckingLevelScale: Float = 1.5
+        static let duckingDelay: Double = 0.02
+        static let triggerRise: Float = 0.2
+        static let retriggerInterval: Double = 0.55
+        static let holdDuration: Double = 0.24
     }
 
-    private static let settingsVersion = 2
+    private static let settingsVersion = 3
     private static let settingsVersionKey = "voiceAurora.echo.settingsVersion"
 
     private enum EchoSettingKey: String {
@@ -427,6 +428,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var levelHistory: [Float] = []
     private let levelHistorySize = 8
     private var echoMix: Float = 0
+    private var eventActiveUntil: Double = 0
+    private var eventWetGain: Float = 0
+    private var eventWetMix: Float = 0
+    private var pendingEventMix: Float = 0
     private var lastDirectionPoint = CGPoint(x: 0.5, y: 0.85)
     private var captureSamples: [Float] = []
     private var captureTargetSamples = 0
@@ -449,6 +454,14 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var lastCurvedLevel: Float = 0
     private var lastEchoTriggerTime: Double = 0
     private var pendingStartWorkItem: DispatchWorkItem?
+    private var lastMicDB: Float = -160
+    private var bleedDeltaDB: Float = -18
+    private let bleedAlpha: Float = 0.03
+    private let snrMarginDB: Float = 9.0
+    private let bleedRiseGuardDB: Float = 1.5
+    private let outDBFloor: Float = -160
+    private let outDBMeter = AtomicFloat(initialValue: -160)
+    private var isWetTapInstalled = false
 
     override init() {
         super.init()
@@ -478,6 +491,21 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         echoTriggerRise = EchoDefaults.triggerRise
         echoRetriggerInterval = EchoDefaults.retriggerInterval
         echoHoldDuration = EchoDefaults.holdDuration
+    }
+
+    private func resetEventState() {
+        cooldownUntil = 0
+        eventActiveUntil = 0
+        eventWetGain = 0
+        eventWetMix = 0
+        pendingEventMix = 0
+        echoMix = 0
+        lastTriggerLevel = 0
+        lastCurvedLevel = 0
+        lastEchoTriggerTime = 0
+        lastMicDB = outDBFloor
+        bleedDeltaDB = -18
+        outDBMeter.set(outDBFloor)
     }
 
     private func restoreSettings() {
@@ -567,6 +595,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
     private func startListeningNow() {
         guard !isListening else { return }
+        resetEventState()
 
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
@@ -602,8 +631,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self?.lastSampleRate = 0
             self?.highPassLastInput = 0
             self?.highPassLastOutput = 0
-            self?.lastTriggerLevel = 0
-            self?.echoMix = 0
+            self?.resetEventState()
             self?.stopPlaybackEngine()
             DispatchQueue.main.async { [weak self] in
                 self?.deactivateAudioSession()
@@ -684,6 +712,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     private func stopPlaybackEngine() {
+        if isWetTapInstalled {
+            boostNode?.removeTap(onBus: 0)
+            isWetTapInstalled = false
+        }
         audioEngine?.stop()
         audioEngine = nil
         playerNode = nil
@@ -692,6 +724,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         boostNode = nil
         playbackFormat = nil
         isInjecting = false
+        outDBMeter.set(outDBFloor)
     }
 
     @discardableResult
@@ -738,11 +771,31 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self.delayNode = delay
             self.boostNode = boost
             self.playbackFormat = format
+            installWetMeterTap(on: boost)
             return true
         } catch {
             print("Aurora playback engine failed: \(error)")
             return false
         }
+    }
+
+    private func installWetMeterTap(on node: AVAudioNode) {
+        guard !isWetTapInstalled else { return }
+        let format = node.outputFormat(forBus: 0)
+        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            guard let data = buffer.floatChannelData?.pointee else { return }
+            let frames = Int(buffer.frameLength)
+            guard frames > 0 else { return }
+            var sum: Float = 0
+            for i in 0..<frames {
+                let value = data[i]
+                sum += value * value
+            }
+            let rms = sqrt(sum / Float(frames))
+            let db = 20 * log10(max(rms, 1e-7))
+            self?.outDBMeter.set(db)
+        }
+        isWetTapInstalled = true
     }
 
     private func processSpatialSamples(frames: Int,
@@ -810,6 +863,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let inputFloor = echoInputFloor.clamped(to: 0.0...1.5)
         let effectiveLevel: Float = normalizedLevel < inputFloor ? 0 : normalizedLevel
         let curvedLevel = pow(effectiveLevel, inputCurve)
+        let micDB = 20 * log10(max(rms * inputGain, 1e-7))
+        let micRiseDB = micDB - lastMicDB
+        lastMicDB = micDB
 
         let estimatedFreq = (Double(zeroCrossings) / 2.0) * sampleRate / Double(frames)
         let logFreq = log2(estimatedFreq / 100.0) / 3.3
@@ -827,18 +883,21 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let retriggerInterval = max(0, echoRetriggerInterval)
         let holdDuration = max(0, echoHoldDuration)
         let levelRise = curvedLevel - lastCurvedLevel
-        let canTrigger = now >= cooldownUntil
+        let echoActive = now < eventActiveUntil
+        let passesMask = shouldTrigger(micDB: micDB, micRiseDB: micRiseDB, echoActive: echoActive)
+        let canTrigger = now >= cooldownUntil && passesMask
         let triggerEcho = !isCapturing && curvedLevel > gateThreshold && levelRise > triggerRise && canTrigger
         if triggerEcho {
             lastEchoTriggerTime = now
             cooldownUntil = now + retriggerInterval
             lastTriggerLevel = curvedLevel
+            pendingEventMix = min(1.0, max(0.0, curvedLevel))
             beginCapture(preRoll: snapshotPreRoll(),
                          holdDuration: holdDuration,
                          sampleRate: sampleRate)
         }
 
-        let targetEcho: Float = now < cooldownUntil ? 1.0 : 0.0
+        let targetEcho: Float = echoActive ? 1.0 : 0.0
         let attackSeconds = max(0.01, Double(echoGateAttack))
         let releaseSeconds = max(0.01, Double(echoGateRelease))
         let attackCoeff = exp(-frameDuration / attackSeconds)
@@ -864,16 +923,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         delayNode?.delayTime = echoDelayTime.clamped(to: 0.0...2.0)
         delayNode?.feedback = echoFeedback.clamped(to: -100.0...100.0)
         delayNode?.lowPassCutoff = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
-        let wetBase = echoWetMixBase.clamped(to: 0.0...100.0)
-        let wetRange = echoWetMixRange.clamped(to: 0.0...100.0)
-        let wetMixValue = wetBase + wetRange * echoMix
         if echoWetOnly {
             delayNode?.wetDryMix = 100
-            let wetGain = min(100, max(0, wetMixValue)) / 100
-            outputGain *= wetGain
+            let gain = echoActive ? eventWetGain : 0
+            outputGain *= gain
         } else {
-            let wetMix = min(100, max(0, wetMixValue))
-            delayNode?.wetDryMix = wetMix
+            delayNode?.wetDryMix = echoActive ? eventWetMix : 0
         }
         boostNode?.globalGain = echoBoostDb.clamped(to: -96.0...24.0)
         gateMixer?.outputVolume = isInjecting ? outputGain * duckingLevel : 0
@@ -979,6 +1034,52 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             }
         }
         playerNode.play()
+
+        let now = CFAbsoluteTimeGetCurrent()
+        beginEchoEvent(now: now,
+                       delayTime: echoDelayTime,
+                       feedback: echoFeedback,
+                       mixAtTrigger: pendingEventMix)
+    }
+
+    private func beginEchoEvent(now: Double,
+                                delayTime: Double,
+                                feedback: Float,
+                                mixAtTrigger: Float) {
+        let wetBase = echoWetMixBase.clamped(to: 0.0...100.0)
+        let wetRange = echoWetMixRange.clamped(to: 0.0...100.0)
+        let mix = max(0, min(1, mixAtTrigger))
+        let wetMix = wetBase + wetRange * mix
+        eventWetMix = wetMix.clamped(to: 0.0...100.0)
+        eventWetGain = min(0.90, max(0.0, eventWetMix / 100.0))
+
+        let tail = estimatedTailDuration(delayTime: delayTime, feedback: feedback)
+        eventActiveUntil = max(eventActiveUntil, now + tail)
+    }
+
+    private func estimatedTailDuration(delayTime: Double, feedback: Float) -> Double {
+        let magnitude = abs(feedback) / 100.0
+        guard magnitude > 0.01 else { return delayTime + 0.15 }
+        let fb = min(0.99, max(0.01, Double(magnitude)))
+        let target = 0.01
+        let repeats = ceil(log(target) / log(fb))
+        guard repeats.isFinite else { return delayTime + 0.15 }
+        return delayTime * max(0, repeats) + 0.15
+    }
+
+    private func shouldTrigger(micDB: Float,
+                               micRiseDB: Float,
+                               echoActive: Bool) -> Bool {
+        guard echoActive else { return true }
+        let outDB = outDBMeter.get()
+
+        if abs(micRiseDB) < bleedRiseGuardDB {
+            let delta = micDB - outDB
+            bleedDeltaDB = (1 - bleedAlpha) * bleedDeltaDB + bleedAlpha * delta
+        }
+
+        let required = outDB + bleedDeltaDB + snrMarginDB
+        return micDB >= required
     }
 
     private func highPassCoefficient(sampleRate: Double, cutoff: Double) -> Float {
@@ -1151,6 +1252,28 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
 
     private static func audioBufferListSize(maximumBuffers: Int) -> Int {
         MemoryLayout<AudioBufferList>.size + (maximumBuffers - 1) * MemoryLayout<AudioBuffer>.size
+    }
+}
+
+private final class AtomicFloat {
+    private let lock = NSLock()
+    private var value: Float
+
+    init(initialValue: Float) {
+        self.value = initialValue
+    }
+
+    func set(_ newValue: Float) {
+        lock.lock()
+        value = newValue
+        lock.unlock()
+    }
+
+    func get() -> Float {
+        lock.lock()
+        let current = value
+        lock.unlock()
+        return current
     }
 }
 
