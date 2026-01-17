@@ -34,16 +34,18 @@ for Voice Aurora so future changes stay aligned with the experience.
 - Playback is a separate `AVAudioEngine` chain fed with the FOA W channel:
   `playerNode -> gateMixer -> delay -> boost -> mainMixer`
 - Loud-first, controlled-fade strategy:
-  - The echo gate only triggers on rising input energy and enforces a retrigger
-    cooldown (`echoTriggerRise`, `echoRetriggerInterval`) to prevent feedback
-    from re-arming the echo.
-  - Keep `echoRetriggerInterval` longer than `echoDelayTime` to avoid the speaker
-    echo re-triggering itself.
-  - `AVAudioUnitDelay` provides repeat spacing (`echoDelayTime`) and decay (`echoFeedback`).
-  - `echoBoostDb` keeps the first echo strong.
-  - Ducking (`duckingStrength`, `duckingLevelScale`, `duckingResponse`) reduces echo
-    when live speech is hot. `duckingDelay` preserves the initial hit before ducking
-    engages.
+- The echo gate only triggers on rising input energy and enforces a retrigger
+  cooldown (`echoTriggerRise`, `echoRetriggerInterval`) to prevent feedback
+  from re-arming the echo.
+- Keep `echoRetriggerInterval` longer than `echoDelayTime` to avoid the speaker
+  echo re-triggering itself.
+- `AVAudioUnitDelay` provides repeat spacing (`echoDelayTime`) and decay (`echoFeedback`).
+- `echoBoostDb` keeps the first echo strong.
+- Wet mix and boost are scaled by the gate/ducking mix so tails collapse quickly
+  when the gate closes.
+- Ducking (`duckingStrength`, `duckingLevelScale`, `duckingResponse`) reduces echo
+  when live speech is hot. `duckingDelay` preserves the initial hit before ducking
+  engages.
 
 Tuning notes:
 - If feedback loops return, reduce `echoFeedback`, increase `echoRetriggerInterval`,

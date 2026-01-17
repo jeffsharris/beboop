@@ -306,18 +306,18 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private let echoGateThreshold: Float = 0.1
     private let echoGateAttack: Float = 0.75
     private let echoGateRelease: Float = 0.8
-    private let echoWetMixBase: Float = 85
-    private let echoWetMixRange: Float = 15
-    private let echoDelayTime: TimeInterval = 0.65
-    private let echoFeedback: Float = 20
+    private let echoWetMixBase: Float = 0
+    private let echoWetMixRange: Float = 100
+    private let echoDelayTime: TimeInterval = 0.7
+    private let echoFeedback: Float = 14
     private let echoLowPassCutoff: Float = 9000
     private let echoBoostDb: Float = 18
-    private let duckingStrength: Float = 0.5
+    private let duckingStrength: Float = 0.65
     private let duckingResponse: Float = 0.22
     private let duckingLevelScale: Float = 0.8
     private let duckingDelay: CFTimeInterval = 0.12
-    private let echoTriggerRise: Float = 0.015
-    private let echoRetriggerInterval: CFTimeInterval = 0.8
+    private let echoTriggerRise: Float = 0.02
+    private let echoRetriggerInterval: CFTimeInterval = 1.0
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
     private var duckingLevel: Float = 1.0
@@ -419,9 +419,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         pendingBuffers = 0
     }
 
-    private func ensurePlaybackEngine(sampleRate: Double) {
-        if let playbackFormat = playbackFormat, abs(playbackFormat.sampleRate - sampleRate) < 0.5 {
-            return
+    @discardableResult
+    private func ensurePlaybackEngine(sampleRate: Double) -> Bool {
+        if let playbackFormat = playbackFormat,
+           abs(playbackFormat.sampleRate - sampleRate) < 0.5,
+           audioEngine?.isRunning == true {
+            return true
         }
 
         stopPlaybackEngine()
@@ -460,8 +463,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self.delayNode = delay
             self.boostNode = boost
             self.playbackFormat = format
+            return true
         } catch {
             print("Aurora playback engine failed: \(error)")
+            return false
         }
     }
 
@@ -469,13 +474,15 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                        sampleRate: Double,
                                        sampleAt: (_ frame: Int, _ channel: Int) -> Float) {
         guard frames > 0, sampleRate > 0 else { return }
-        ensurePlaybackEngine(sampleRate: sampleRate)
-        guard let playbackFormat = playbackFormat else { return }
-
+        let canPlayback = ensurePlaybackEngine(sampleRate: sampleRate)
         let frameCount = AVAudioFrameCount(frames)
-        guard let playbackBuffer = AVAudioPCMBuffer(pcmFormat: playbackFormat, frameCapacity: frameCount),
-              let playbackData = playbackBuffer.floatChannelData?.pointee else {
-            return
+        var playbackBuffer: AVAudioPCMBuffer?
+        var playbackData: UnsafeMutablePointer<Float>?
+        if canPlayback, let playbackFormat = playbackFormat,
+           let buffer = AVAudioPCMBuffer(pcmFormat: playbackFormat, frameCapacity: frameCount),
+           let data = buffer.floatChannelData?.pointee {
+            playbackBuffer = buffer
+            playbackData = data
         }
 
         var sumW2: Float = 0
@@ -491,7 +498,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             let z = sampleAt(i, 2)
             let x = sampleAt(i, 3)
 
-            playbackData[i] = w
+            if let playbackData = playbackData {
+                playbackData[i] = w
+            }
 
             sumW2 += w * w
             sumXW += x * w
@@ -506,8 +515,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             previous = w
         }
 
-        playbackBuffer.frameLength = frameCount
-        enqueuePlayback(playbackBuffer)
+        if let playbackBuffer = playbackBuffer {
+            playbackBuffer.frameLength = frameCount
+            enqueuePlayback(playbackBuffer)
+        }
 
         let rms = sqrt(sumW2 / Float(frames))
         let normalizedLevel = min(1.0, rms * 8.0)
@@ -543,7 +554,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         duckingLevel = duckingLevel * (1 - duckingResponse) + duckingTarget * duckingResponse
 
         let duckedMix = echoMix * duckingLevel
-        let duckedGain = echoBoostDb * duckingLevel
+        let duckedGain = echoBoostDb * duckedMix
 
         gateMixer?.outputVolume = duckedMix
         delayNode?.wetDryMix = echoWetMixBase + echoWetMixRange * duckedMix
