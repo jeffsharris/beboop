@@ -16,7 +16,6 @@ struct VoiceAuroraClassicView: View {
         let phase: Double
     }
 
-    @EnvironmentObject private var audioCoordinator: AudioCoordinator
     @StateObject private var audioProcessor = ClassicAuroraAudioProcessor()
     @State private var waves: [Wave] = []
     @State private var lastWaveTime: Date = .distantPast
@@ -45,16 +44,13 @@ struct VoiceAuroraClassicView: View {
             .ignoresSafeArea()
         }
         .onAppear {
-            audioCoordinator.register(mode: .voiceAuroraClassic,
-                                      start: {
-                                          audioProcessor.startListening()
-                                      },
-                                      stop: { completion in
-                                          audioProcessor.stopListening(completion: completion)
-                                      })
+            audioProcessor.startListening(after: AudioHandoff.startDelay)
         }
         .onDisappear {
-            audioCoordinator.unregister(mode: .voiceAuroraClassic)
+            audioProcessor.stopListening()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
+            audioProcessor.stopListening()
         }
     }
 
@@ -269,7 +265,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
-    func stopListening(completion: (() -> Void)? = nil) {
+    func stopListening() {
         pendingStartWorkItem?.cancel()
         pendingStartWorkItem = nil
         isListening = false
@@ -281,7 +277,6 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         delayNode = nil
         boostNode = nil
         deactivateAudioSession()
-        completion?()
     }
 
     private func setupAudioEngine() {
@@ -338,7 +333,6 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     private func configureAudioSession(_ session: AVAudioSession) throws {
         try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
         try session.setMode(.voiceChat)
-        try session.setPreferredInputNumberOfChannels(1)
         try session.setActive(true)
 
         let usesReceiver = session.currentRoute.outputs.contains { $0.portType == .builtInReceiver }
@@ -444,5 +438,4 @@ private extension Double {
 
 #Preview {
     VoiceAuroraClassicView()
-        .environmentObject(AudioCoordinator())
 }

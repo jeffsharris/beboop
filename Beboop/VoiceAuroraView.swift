@@ -1,229 +1,7 @@
 import SwiftUI
 import AVFoundation
-#if canImport(AVFAudio)
-import AVFAudio
-#endif
-import AudioToolbox
 import CoreAudioTypes
 import CoreMedia
-
-enum SpatialPresetID: String, CaseIterable, Identifiable {
-    case optionA
-    case optionB
-    case optionC
-    case optionD
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .optionA:
-            return "Preset A"
-        case .optionB:
-            return "Preset B"
-        case .optionC:
-            return "Preset C"
-        case .optionD:
-            return "Preset D"
-        }
-    }
-
-    var menuTitle: String {
-        switch self {
-        case .optionA:
-            return "Preset A — Default"
-        case .optionB:
-            return "Preset B — Stronger Gate"
-        case .optionC:
-            return "Preset C — Easier Retrigger"
-        case .optionD:
-            return "Preset D — Tap Resistant"
-        }
-    }
-
-    var preset: SpatialPreset {
-        switch self {
-        case .optionA:
-            return .optionA
-        case .optionB:
-            return .optionB
-        case .optionC:
-            return .optionC
-        case .optionD:
-            return .optionD
-        }
-    }
-}
-
-struct SpatialPreset {
-    let masterOutput: Float
-    let outputRatio: Float
-    let wetOnly: Bool
-    let inputGain: Float
-    let inputCurve: Float
-    let inputFloor: Float
-    let gateThreshold: Float
-    let gateAttack: Float
-    let gateRelease: Float
-    let triggerRise: Float
-    let retriggerInterval: Double
-    let holdDuration: Double
-    let delayTime: Double
-    let feedback: Float
-    let wetMixBase: Float
-    let wetMixRange: Float
-    let lowPassCutoff: Float
-    let boostDb: Float
-    let duckingStrength: Float
-    let duckingResponse: Float
-    let duckingLevelScale: Float
-    let duckingDelay: Double
-    let gateHighPassCutoff: Float
-    let hardDeafen: Double
-    let bleedTauUp: Float
-    let bleedTauDown: Float
-    let bleedUpStepCap: Float
-    let floorMul: Float
-    let threshMul: Float
-    let threshBias: Float
-    let riseMinWhenEchoActive: Float
-
-    static let optionA = SpatialPreset(
-        masterOutput: 0.54,
-        outputRatio: 0.95,
-        wetOnly: true,
-        inputGain: 12.0,
-        inputCurve: 1.45,
-        inputFloor: 0.14,
-        gateThreshold: 0.52,
-        gateAttack: 0.06,
-        gateRelease: 0.28,
-        triggerRise: 0.22,
-        retriggerInterval: 0.65,
-        holdDuration: 0.26,
-        delayTime: 0.33,
-        feedback: 52,
-        wetMixBase: 6,
-        wetMixRange: 62,
-        lowPassCutoff: 5500,
-        boostDb: 0.0,
-        duckingStrength: 0.78,
-        duckingResponse: 0.06,
-        duckingLevelScale: 1.50,
-        duckingDelay: 0.02,
-        gateHighPassCutoff: 180,
-        hardDeafen: 0.20,
-        bleedTauUp: 0.70,
-        bleedTauDown: 0.20,
-        bleedUpStepCap: 0.03,
-        floorMul: 1.10,
-        threshMul: 1.65,
-        threshBias: 0.05,
-        riseMinWhenEchoActive: 0.22
-    )
-
-    static let optionB = SpatialPreset(
-        masterOutput: 0.54,
-        outputRatio: 0.95,
-        wetOnly: true,
-        inputGain: 12.0,
-        inputCurve: 1.45,
-        inputFloor: 0.14,
-        gateThreshold: 0.52,
-        gateAttack: 0.06,
-        gateRelease: 0.28,
-        triggerRise: 0.22,
-        retriggerInterval: 0.65,
-        holdDuration: 0.26,
-        delayTime: 0.33,
-        feedback: 48,
-        wetMixBase: 6,
-        wetMixRange: 55,
-        lowPassCutoff: 5500,
-        boostDb: 0.0,
-        duckingStrength: 0.78,
-        duckingResponse: 0.06,
-        duckingLevelScale: 1.50,
-        duckingDelay: 0.02,
-        gateHighPassCutoff: 180,
-        hardDeafen: 0.28,
-        bleedTauUp: 0.70,
-        bleedTauDown: 0.20,
-        bleedUpStepCap: 0.03,
-        floorMul: 1.10,
-        threshMul: 1.85,
-        threshBias: 0.05,
-        riseMinWhenEchoActive: 0.22
-    )
-
-    static let optionC = SpatialPreset(
-        masterOutput: 0.54,
-        outputRatio: 0.95,
-        wetOnly: true,
-        inputGain: 12.0,
-        inputCurve: 1.45,
-        inputFloor: 0.14,
-        gateThreshold: 0.52,
-        gateAttack: 0.06,
-        gateRelease: 0.28,
-        triggerRise: 0.18,
-        retriggerInterval: 0.65,
-        holdDuration: 0.26,
-        delayTime: 0.33,
-        feedback: 52,
-        wetMixBase: 6,
-        wetMixRange: 62,
-        lowPassCutoff: 5500,
-        boostDb: 0.0,
-        duckingStrength: 0.78,
-        duckingResponse: 0.06,
-        duckingLevelScale: 1.50,
-        duckingDelay: 0.02,
-        gateHighPassCutoff: 180,
-        hardDeafen: 0.20,
-        bleedTauUp: 0.70,
-        bleedTauDown: 0.20,
-        bleedUpStepCap: 0.02,
-        floorMul: 1.10,
-        threshMul: 1.50,
-        threshBias: 0.03,
-        riseMinWhenEchoActive: 0.18
-    )
-
-    static let optionD = SpatialPreset(
-        masterOutput: 0.54,
-        outputRatio: 0.95,
-        wetOnly: true,
-        inputGain: 12.0,
-        inputCurve: 1.45,
-        inputFloor: 0.18,
-        gateThreshold: 0.60,
-        gateAttack: 0.06,
-        gateRelease: 0.28,
-        triggerRise: 0.22,
-        retriggerInterval: 0.65,
-        holdDuration: 0.26,
-        delayTime: 0.33,
-        feedback: 52,
-        wetMixBase: 6,
-        wetMixRange: 62,
-        lowPassCutoff: 5500,
-        boostDb: 0.0,
-        duckingStrength: 0.78,
-        duckingResponse: 0.06,
-        duckingLevelScale: 1.50,
-        duckingDelay: 0.02,
-        gateHighPassCutoff: 220,
-        hardDeafen: 0.20,
-        bleedTauUp: 0.70,
-        bleedTauDown: 0.20,
-        bleedUpStepCap: 0.03,
-        floorMul: 1.10,
-        threshMul: 1.65,
-        threshBias: 0.05,
-        riseMinWhenEchoActive: 0.22
-    )
-}
 
 struct VoiceAuroraView: View {
     private enum Edge {
@@ -243,11 +21,11 @@ struct VoiceAuroraView: View {
         let phase: Double
     }
 
-    @EnvironmentObject private var audioCoordinator: AudioCoordinator
     @StateObject private var audioProcessor = AuroraAudioProcessor()
     @State private var waves: [Wave] = []
     @State private var lastUpdateTime: Date = Date()
     @State private var lastWaveTime: Date = .distantPast
+    @State private var isTuningPresented = false
 
     private let waveCooldown: TimeInterval = 0.16
     private let waveMinLevel: Double = 0.08
@@ -257,6 +35,7 @@ struct VoiceAuroraView: View {
     var body: some View {
         GeometryReader { geometry in
             let bottomInset = max(16, geometry.safeAreaInsets.bottom + 8)
+            let panelMaxHeight = min(geometry.size.height * 0.7, 620)
 
             ZStack {
                 TimelineView(.animation) { timeline in
@@ -274,20 +53,21 @@ struct VoiceAuroraView: View {
                 }
                 .ignoresSafeArea()
 
-                presetMenu(bottomInset: bottomInset)
+                tuningButton(bottomInset: bottomInset)
+
+                if isTuningPresented {
+                    tuningPanel(bottomInset: bottomInset, maxHeight: panelMaxHeight)
+                }
             }
         }
         .onAppear {
-            audioCoordinator.register(mode: .voiceAurora,
-                                      start: {
-                                          audioProcessor.startListening()
-                                      },
-                                      stop: { completion in
-                                          audioProcessor.stopListening(completion: completion)
-                                      })
+            audioProcessor.startListening(after: AudioHandoff.startDelay)
         }
         .onDisappear {
-            audioCoordinator.unregister(mode: .voiceAurora)
+            audioProcessor.stopListening()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
+            audioProcessor.stopListening()
         }
     }
 
@@ -509,82 +289,603 @@ struct VoiceAuroraView: View {
         return path
     }
 
-    private func presetMenu(bottomInset: CGFloat) -> some View {
+    private func tuningButton(bottomInset: CGFloat) -> some View {
         VStack {
             Spacer()
             HStack {
-                Menu {
-                    ForEach(SpatialPresetID.allCases) { preset in
-                        Button {
-                            audioProcessor.selectPreset(preset)
-                        } label: {
-                            Text(preset.menuTitle)
-                        }
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isTuningPresented.toggle()
                     }
                 } label: {
-                    HStack(spacing: 8) {
-                        Text(audioProcessor.selectedPreset.label)
-                            .font(.subheadline.weight(.semibold))
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 4)
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 4)
                 }
+                .buttonStyle(.plain)
                 .padding(.leading, 18)
                 .padding(.bottom, bottomInset)
                 Spacer()
             }
         }
     }
+
+    private func tuningPanel(bottomInset: CGFloat, maxHeight: CGFloat) -> some View {
+        VStack {
+            Spacer()
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Echo Tuning")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isTuningPresented = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        sliderSectionHeader("Output")
+                        sliderRow(title: "Master Output",
+                                  value: floatBinding(\.echoMasterOutput),
+                                  range: 0...1,
+                                  step: 0.01,
+                                  format: "%.2f")
+                        sliderRow(title: "Input Output Ratio",
+                                  value: floatBinding(\.echoOutputRatio),
+                                  range: 0...1,
+                                  step: 0.02,
+                                  format: "%.2f")
+                        Toggle("Wet Only (no dry monitor)",
+                               isOn: boolBinding(\.echoWetOnly))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.primary)
+
+                        sliderSectionHeader("Input Mapping")
+                        controlPad(title: "Gain vs Curve",
+                                   xLabel: "Gain",
+                                   yLabel: "Curve",
+                                   xValue: floatBinding(\.echoInputGain),
+                                   yValue: floatBinding(\.echoInputCurve),
+                                   xRange: 0...24,
+                                   yRange: 0.2...2.5)
+                        inputCurvePreview()
+                            .frame(height: 120)
+                        sliderRow(title: "Input Gain",
+                                  value: floatBinding(\.echoInputGain),
+                                  range: 0...24,
+                                  step: 0.2,
+                                  format: "%.1f")
+                        sliderRow(title: "Input Curve",
+                                  value: floatBinding(\.echoInputCurve),
+                                  range: 0.2...2.5,
+                                  step: 0.05,
+                                  format: "%.2f")
+                        sliderRow(title: "Input Floor",
+                                  value: floatBinding(\.echoInputFloor),
+                                  range: 0.0...1.5,
+                                  step: 0.01,
+                                  format: "%.2f")
+
+                        sliderSectionHeader("Gate")
+                        sliderRow(title: "Gate Threshold",
+                                  value: floatBinding(\.echoGateThreshold),
+                                  range: 0.0...2.0,
+                                  step: 0.02,
+                                  format: "%.2f")
+                        sliderRow(title: "Gate Attack",
+                                  value: floatBinding(\.echoGateAttack),
+                                  range: 0.05...0.99,
+                                  step: 0.02,
+                                  format: "%.2f",
+                                  suffix: "s")
+                        sliderRow(title: "Gate Release",
+                                  value: floatBinding(\.echoGateRelease),
+                                  range: 0.05...0.99,
+                                  step: 0.02,
+                                  format: "%.2f",
+                                  suffix: "s")
+
+                        sliderSectionHeader("Trigger")
+                        sliderRow(title: "Trigger Rise",
+                                  value: floatBinding(\.echoTriggerRise),
+                                  range: 0.0...0.6,
+                                  step: 0.02,
+                                  format: "%.3f")
+                        sliderRow(title: "Retrigger Interval",
+                                  value: doubleBinding(\.echoRetriggerInterval),
+                                  range: 0.0...8.0,
+                                  step: 0.1,
+                                  format: "%.2f",
+                                  suffix: "s")
+                        sliderRow(title: "Capture Duration",
+                                  value: doubleBinding(\.echoHoldDuration),
+                                  range: 0.0...2.0,
+                                  step: 0.05,
+                                  format: "%.2f",
+                                  suffix: "s")
+
+                        sliderSectionHeader("Echo Tail")
+                        controlPad(title: "Delay vs Feedback",
+                                   xLabel: "Delay",
+                                   yLabel: "Feedback",
+                                   xValue: doubleBinding(\.echoDelayTime),
+                                   yValue: floatBinding(\.echoFeedback),
+                                   xRange: 0.0...2.0,
+                                   yRange: -100.0...100.0,
+                                   showZeroLine: true)
+
+                        sliderSectionHeader("Delay")
+                        sliderRow(title: "Delay Time",
+                                  value: doubleBinding(\.echoDelayTime),
+                                  range: 0.0...2.0,
+                                  step: 0.05,
+                                  format: "%.2f",
+                                  suffix: "s")
+                        sliderRow(title: "Feedback",
+                                  value: floatBinding(\.echoFeedback),
+                                  range: -100...100,
+                                  step: 2,
+                                  format: "%.0f")
+                        sliderRow(title: "Wet Base",
+                                  value: floatBinding(\.echoWetMixBase),
+                                  range: 0...100,
+                                  step: 1,
+                                  format: "%.0f")
+                        sliderRow(title: "Wet Range",
+                                  value: floatBinding(\.echoWetMixRange),
+                                  range: 0...100,
+                                  step: 1,
+                                  format: "%.0f")
+
+                        sliderSectionHeader("Tone")
+                        sliderRow(title: "Low-pass",
+                                  value: floatBinding(\.echoLowPassCutoff),
+                                  range: 10...20000,
+                                  step: 200,
+                                  format: "%.0f",
+                                  suffix: "Hz")
+                        sliderRow(title: "Boost",
+                                  value: floatBinding(\.echoBoostDb),
+                                  range: -96...24,
+                                  step: 1,
+                                  format: "%.1f",
+                                  suffix: "dB")
+
+                        sliderSectionHeader("Ducking")
+                        sliderRow(title: "Strength",
+                                  value: floatBinding(\.duckingStrength),
+                                  range: 0...1.0,
+                                  step: 0.05,
+                                  format: "%.2f")
+                        sliderRow(title: "Response",
+                                  value: floatBinding(\.duckingResponse),
+                                  range: 0.01...1.0,
+                                  step: 0.02,
+                                  format: "%.2f")
+                        sliderRow(title: "Level Scale",
+                                  value: floatBinding(\.duckingLevelScale),
+                                  range: 0...2.0,
+                                  step: 0.05,
+                                  format: "%.2f")
+                        sliderRow(title: "Ducking Delay",
+                                  value: doubleBinding(\.duckingDelay),
+                                  range: 0...1.0,
+                                  step: 0.02,
+                                  format: "%.2f",
+                                  suffix: "s")
+                    }
+                    .padding(.vertical, 8)
+                }
+                .frame(maxHeight: maxHeight)
+
+                Button {
+                    audioProcessor.resetEchoDefaults()
+                } label: {
+                    Text("Reset Defaults")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.white.opacity(0.6))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, bottomInset)
+            .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func sliderRow(title: String,
+                           value: Binding<Double>,
+                           range: ClosedRange<Double>,
+                           step: Double,
+                           format: String,
+                           suffix: String = "") -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.primary)
+                Spacer()
+                Text(String(format: format, value.wrappedValue) + suffix)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            Slider(value: value, in: range, step: step)
+        }
+    }
+
+    private func controlPad(title: String,
+                            xLabel: String,
+                            yLabel: String,
+                            xValue: Binding<Double>,
+                            yValue: Binding<Double>,
+                            xRange: ClosedRange<Double>,
+                            yRange: ClosedRange<Double>,
+                            showZeroLine: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                Spacer()
+                Text("\(xLabel) \(formatValue(xValue.wrappedValue)) · \(yLabel) \(formatValue(yValue.wrappedValue))")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            GeometryReader { proxy in
+                let size = proxy.size
+                let handlePosition = controlPadPosition(size: size,
+                                                        xValue: xValue.wrappedValue,
+                                                        yValue: yValue.wrappedValue,
+                                                        xRange: xRange,
+                                                        yRange: yRange)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.black.opacity(0.12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                        )
+
+                    controlPadGrid(size: size)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+
+                    if showZeroLine, yRange.lowerBound < 0, yRange.upperBound > 0 {
+                        let zeroY = controlPadZeroLine(size: size, yRange: yRange)
+                        Path { path in
+                            path.move(to: CGPoint(x: 8, y: zeroY))
+                            path.addLine(to: CGPoint(x: size.width - 8, y: zeroY))
+                        }
+                        .stroke(Color.white.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [6, 6]))
+                    }
+
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 18, height: 18)
+                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                        .position(handlePosition)
+                }
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let location = CGPoint(x: min(max(0, value.location.x), size.width),
+                                                   y: min(max(0, value.location.y), size.height))
+                            let normalizedX = location.x / max(1, size.width)
+                            let normalizedY = 1 - (location.y / max(1, size.height))
+
+                            xValue.wrappedValue = xRange.lowerBound + normalizedX * (xRange.upperBound - xRange.lowerBound)
+                            yValue.wrappedValue = yRange.lowerBound + normalizedY * (yRange.upperBound - yRange.lowerBound)
+                        }
+                )
+            }
+            .frame(height: 140)
+
+            HStack {
+                Text(xLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(yLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private func inputCurvePreview() -> some View {
+        let gain = Double(audioProcessor.echoInputGain)
+        let curve = Double(audioProcessor.echoInputCurve)
+        let floor = Double(audioProcessor.echoInputFloor)
+        let threshold = Double(audioProcessor.echoGateThreshold)
+
+        return GeometryReader { proxy in
+            let size = proxy.size
+            let lineWidth = max(2, size.width * 0.008)
+            let path = Path { path in
+                let steps = 80
+                let clampedCurve = min(2.5, max(0.2, curve))
+                for step in 0...steps {
+                    let x = Double(step) / Double(steps)
+                    let normalized = min(1.0, x * max(0, gain))
+                    let effective = normalized < floor ? 0 : normalized
+                    let shaped = pow(effective, clampedCurve)
+                    let plotX = x * size.width
+                    let plotY = size.height - min(1.2, shaped) / 1.2 * size.height
+
+                    if step == 0 {
+                        path.move(to: CGPoint(x: plotX, y: plotY))
+                    } else {
+                        path.addLine(to: CGPoint(x: plotX, y: plotY))
+                    }
+
+                }
+            }
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.black.opacity(0.15))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+
+                if gain > 0 {
+                    let floorX = min(1.0, floor / max(0.0001, gain)) * size.width
+                    Path { path in
+                        path.move(to: CGPoint(x: floorX, y: 10))
+                        path.addLine(to: CGPoint(x: floorX, y: size.height - 10))
+                    }
+                    .stroke(Color.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 6]))
+                }
+
+                let thresholdY = size.height - min(1.2, max(0, threshold)) / 1.2 * size.height
+                Path { path in
+                    path.move(to: CGPoint(x: 10, y: thresholdY))
+                    path.addLine(to: CGPoint(x: size.width - 10, y: thresholdY))
+                }
+                .stroke(Color.white.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [4, 6]))
+
+                path
+                    .stroke(Color.white.opacity(0.85), lineWidth: lineWidth)
+            }
+        }
+    }
+
+    private func sliderSectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.semibold))
+            .foregroundColor(.secondary)
+            .padding(.top, 6)
+    }
+
+    private func floatBinding(_ keyPath: ReferenceWritableKeyPath<AuroraAudioProcessor, Float>) -> Binding<Double> {
+        Binding(
+            get: { Double(audioProcessor[keyPath: keyPath]) },
+            set: { audioProcessor[keyPath: keyPath] = Float($0) }
+        )
+    }
+
+    private func doubleBinding(_ keyPath: ReferenceWritableKeyPath<AuroraAudioProcessor, Double>) -> Binding<Double> {
+        Binding(
+            get: { audioProcessor[keyPath: keyPath] },
+            set: { audioProcessor[keyPath: keyPath] = $0 }
+        )
+    }
+
+    private func boolBinding(_ keyPath: ReferenceWritableKeyPath<AuroraAudioProcessor, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { audioProcessor[keyPath: keyPath] },
+            set: { audioProcessor[keyPath: keyPath] = $0 }
+        )
+    }
+
+    private func controlPadPosition(size: CGSize,
+                                    xValue: Double,
+                                    yValue: Double,
+                                    xRange: ClosedRange<Double>,
+                                    yRange: ClosedRange<Double>) -> CGPoint {
+        let clampedX = min(max(xValue, xRange.lowerBound), xRange.upperBound)
+        let clampedY = min(max(yValue, yRange.lowerBound), yRange.upperBound)
+        let normalizedX = (clampedX - xRange.lowerBound) / (xRange.upperBound - xRange.lowerBound)
+        let normalizedY = (clampedY - yRange.lowerBound) / (yRange.upperBound - yRange.lowerBound)
+        let x = normalizedX * size.width
+        let y = (1 - normalizedY) * size.height
+        return CGPoint(x: x, y: y)
+    }
+
+    private func controlPadGrid(size: CGSize) -> Path {
+        Path { path in
+            let columns = 4
+            let rows = 4
+            let xStep = size.width / CGFloat(columns)
+            let yStep = size.height / CGFloat(rows)
+
+            for index in 1..<columns {
+                let x = CGFloat(index) * xStep
+                path.move(to: CGPoint(x: x, y: 8))
+                path.addLine(to: CGPoint(x: x, y: size.height - 8))
+            }
+
+            for index in 1..<rows {
+                let y = CGFloat(index) * yStep
+                path.move(to: CGPoint(x: 8, y: y))
+                path.addLine(to: CGPoint(x: size.width - 8, y: y))
+            }
+        }
+    }
+
+    private func controlPadZeroLine(size: CGSize, yRange: ClosedRange<Double>) -> CGFloat {
+        let normalized = (0 - yRange.lowerBound) / (yRange.upperBound - yRange.lowerBound)
+        return (1 - normalized) * size.height
+    }
+
+    private func formatValue(_ value: Double) -> String {
+        if abs(value) >= 1000 {
+            return String(format: "%.0f", value)
+        }
+        if abs(value) >= 100 {
+            return String(format: "%.1f", value)
+        }
+        if abs(value) >= 10 {
+            return String(format: "%.2f", value)
+        }
+        return String(format: "%.3f", value)
+    }
 }
 
 // MARK: - Audio Processor
 
 final class AuroraAudioProcessor: NSObject, ObservableObject {
-    private static let settingsVersion = 3
-    private static let settingsVersionKey = "voiceAurora.spatial.settingsVersion"
-    private static let presetKey = "voiceAurora.spatial.preset"
+    private enum EchoDefaults {
+        static let inputGain: Float = 8.0
+        static let inputCurve: Float = 0.7
+        static let inputFloor: Float = 0.08
+        static let gateThreshold: Float = 0.22
+        static let gateAttack: Float = 0.06
+        static let gateRelease: Float = 0.22
+        static let masterOutput: Float = 0.55
+        static let outputRatio: Float = 0.65
+        static let wetOnly: Bool = true
+        static let wetMixBase: Float = 0
+        static let wetMixRange: Float = 85
+        static let delayTime: Double = 0.28
+        static let feedback: Float = 48
+        static let lowPassCutoff: Float = 6000
+        static let boostDb: Float = 3
+        static let duckingStrength: Float = 0.65
+        static let duckingResponse: Float = 0.05
+        static let duckingLevelScale: Float = 1.0
+        static let duckingDelay: Double = 0.0
+        static let triggerRise: Float = 0.08
+        static let retriggerInterval: Double = 2.6
+        static let holdDuration: Double = 0.35
+    }
+
+    private static let settingsVersion = 2
+    private static let settingsVersionKey = "voiceAurora.echo.settingsVersion"
+
+    private enum EchoSettingKey: String {
+        case inputGain = "voiceAurora.echo.inputGain"
+        case inputCurve = "voiceAurora.echo.inputCurve"
+        case inputFloor = "voiceAurora.echo.inputFloor"
+        case gateThreshold = "voiceAurora.echo.gateThreshold"
+        case gateAttack = "voiceAurora.echo.gateAttack"
+        case gateRelease = "voiceAurora.echo.gateRelease"
+        case masterOutput = "voiceAurora.echo.masterOutput"
+        case outputRatio = "voiceAurora.echo.outputRatio"
+        case wetOnly = "voiceAurora.echo.wetOnly"
+        case wetMixBase = "voiceAurora.echo.wetMixBase"
+        case wetMixRange = "voiceAurora.echo.wetMixRange"
+        case delayTime = "voiceAurora.echo.delayTime"
+        case feedback = "voiceAurora.echo.feedback"
+        case lowPassCutoff = "voiceAurora.echo.lowPassCutoff"
+        case boostDb = "voiceAurora.echo.boostDb"
+        case duckingStrength = "voiceAurora.echo.duckingStrength"
+        case duckingResponse = "voiceAurora.echo.duckingResponse"
+        case duckingLevelScale = "voiceAurora.echo.duckingLevelScale"
+        case duckingDelay = "voiceAurora.echo.duckingDelay"
+        case triggerRise = "voiceAurora.echo.triggerRise"
+        case retriggerInterval = "voiceAurora.echo.retriggerInterval"
+        case holdDuration = "voiceAurora.echo.holdDuration"
+    }
 
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
     @Published var sourcePoint: CGPoint = CGPoint(x: 0.5, y: 0.9)
-    @Published private(set) var selectedPreset: SpatialPresetID = .optionA
+    @Published var echoInputGain: Float = EchoDefaults.inputGain {
+        didSet { persistSetting(.inputGain, value: echoInputGain) }
+    }
+    @Published var echoInputCurve: Float = EchoDefaults.inputCurve {
+        didSet { persistSetting(.inputCurve, value: echoInputCurve) }
+    }
+    @Published var echoInputFloor: Float = EchoDefaults.inputFloor {
+        didSet { persistSetting(.inputFloor, value: echoInputFloor) }
+    }
+    @Published var echoGateThreshold: Float = EchoDefaults.gateThreshold {
+        didSet { persistSetting(.gateThreshold, value: echoGateThreshold) }
+    }
+    @Published var echoGateAttack: Float = EchoDefaults.gateAttack {
+        didSet { persistSetting(.gateAttack, value: echoGateAttack) }
+    }
+    @Published var echoGateRelease: Float = EchoDefaults.gateRelease {
+        didSet { persistSetting(.gateRelease, value: echoGateRelease) }
+    }
+    @Published var echoMasterOutput: Float = EchoDefaults.masterOutput {
+        didSet { persistSetting(.masterOutput, value: echoMasterOutput) }
+    }
+    @Published var echoOutputRatio: Float = EchoDefaults.outputRatio {
+        didSet { persistSetting(.outputRatio, value: echoOutputRatio) }
+    }
+    @Published var echoWetOnly: Bool = EchoDefaults.wetOnly {
+        didSet { persistSetting(.wetOnly, value: echoWetOnly) }
+    }
+    @Published var echoWetMixBase: Float = EchoDefaults.wetMixBase {
+        didSet { persistSetting(.wetMixBase, value: echoWetMixBase) }
+    }
+    @Published var echoWetMixRange: Float = EchoDefaults.wetMixRange {
+        didSet { persistSetting(.wetMixRange, value: echoWetMixRange) }
+    }
+    @Published var echoDelayTime: Double = EchoDefaults.delayTime {
+        didSet { persistSetting(.delayTime, value: echoDelayTime) }
+    }
+    @Published var echoFeedback: Float = EchoDefaults.feedback {
+        didSet { persistSetting(.feedback, value: echoFeedback) }
+    }
+    @Published var echoLowPassCutoff: Float = EchoDefaults.lowPassCutoff {
+        didSet { persistSetting(.lowPassCutoff, value: echoLowPassCutoff) }
+    }
+    @Published var echoBoostDb: Float = EchoDefaults.boostDb {
+        didSet { persistSetting(.boostDb, value: echoBoostDb) }
+    }
+    @Published var duckingStrength: Float = EchoDefaults.duckingStrength {
+        didSet { persistSetting(.duckingStrength, value: duckingStrength) }
+    }
+    @Published var duckingResponse: Float = EchoDefaults.duckingResponse {
+        didSet { persistSetting(.duckingResponse, value: duckingResponse) }
+    }
+    @Published var duckingLevelScale: Float = EchoDefaults.duckingLevelScale {
+        didSet { persistSetting(.duckingLevelScale, value: duckingLevelScale) }
+    }
+    @Published var duckingDelay: Double = EchoDefaults.duckingDelay {
+        didSet { persistSetting(.duckingDelay, value: duckingDelay) }
+    }
+    @Published var echoTriggerRise: Float = EchoDefaults.triggerRise {
+        didSet { persistSetting(.triggerRise, value: echoTriggerRise) }
+    }
+    @Published var echoRetriggerInterval: Double = EchoDefaults.retriggerInterval {
+        didSet { persistSetting(.retriggerInterval, value: echoRetriggerInterval) }
+    }
+    @Published var echoHoldDuration: Double = EchoDefaults.holdDuration {
+        didSet { persistSetting(.holdDuration, value: echoHoldDuration) }
+    }
 
-    private var echoInputGain: Float = SpatialPreset.optionA.inputGain
-    private var echoInputCurve: Float = SpatialPreset.optionA.inputCurve
-    private var echoInputFloor: Float = SpatialPreset.optionA.inputFloor
-    private var echoGateThreshold: Float = SpatialPreset.optionA.gateThreshold
-    private var echoGateAttack: Float = SpatialPreset.optionA.gateAttack
-    private var echoGateRelease: Float = SpatialPreset.optionA.gateRelease
-    private var echoMasterOutput: Float = SpatialPreset.optionA.masterOutput
-    private var echoOutputRatio: Float = SpatialPreset.optionA.outputRatio
-    private var echoWetOnly: Bool = SpatialPreset.optionA.wetOnly
-    private var echoWetMixBase: Float = SpatialPreset.optionA.wetMixBase
-    private var echoWetMixRange: Float = SpatialPreset.optionA.wetMixRange
-    private var echoDelayTime: Double = SpatialPreset.optionA.delayTime
-    private var echoFeedback: Float = SpatialPreset.optionA.feedback
-    private var echoLowPassCutoff: Float = SpatialPreset.optionA.lowPassCutoff
-    private var echoBoostDb: Float = SpatialPreset.optionA.boostDb
-    private var duckingStrength: Float = SpatialPreset.optionA.duckingStrength
-    private var duckingResponse: Float = SpatialPreset.optionA.duckingResponse
-    private var duckingLevelScale: Float = SpatialPreset.optionA.duckingLevelScale
-    private var duckingDelay: Double = SpatialPreset.optionA.duckingDelay
-    private var echoTriggerRise: Float = SpatialPreset.optionA.triggerRise
-    private var echoRetriggerInterval: Double = SpatialPreset.optionA.retriggerInterval
-    private var echoHoldDuration: Double = SpatialPreset.optionA.holdDuration
-    private var gateHighPassCutoff: Float = SpatialPreset.optionA.gateHighPassCutoff
-    private var hardDeafen: Double = SpatialPreset.optionA.hardDeafen
-    private var bleedTauUp: Float = SpatialPreset.optionA.bleedTauUp
-    private var bleedTauDown: Float = SpatialPreset.optionA.bleedTauDown
-    private var bleedUpStepCap: Float = SpatialPreset.optionA.bleedUpStepCap
-    private var floorMul: Float = SpatialPreset.optionA.floorMul
-    private var threshMul: Float = SpatialPreset.optionA.threshMul
-    private var threshBias: Float = SpatialPreset.optionA.threshBias
-    private var riseMinWhenEchoActive: Float = SpatialPreset.optionA.riseMinWhenEchoActive
+    private var isRestoringSettings = false
 
     private let captureQueue = DispatchQueue(label: "VoiceAurora.Capture")
     private let foaLayoutTag: AudioChannelLayoutTag = AudioChannelLayoutTag(kAudioChannelLayoutTag_HOA_ACN_SN3D | 4)
@@ -598,7 +899,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var gateMixer: AVAudioMixerNode?
     private var delayNode: AVAudioUnitDelay?
     private var boostNode: AVAudioUnitEQ?
-    private var limiterNode: AVAudioUnitEffect?
     private var playbackFormat: AVAudioFormat?
     private var isListening = false
     private var levelHistory: [Float] = []
@@ -612,21 +912,18 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var preRollIndex = 0
     private var preRollFilled = false
     private let preRollDuration: Double = 0.05
-    private var echoActiveUntil: Double = 0
-    private var hardDeafenUntil: Double = 0
-    private var nextTriggerAllowedAt: Double = 0
-    private var bleedEMA: Float = 0
-    private var lastGateSignal: Float = 0
-    private var lastGateUpdateTime: Double = 0
+    private var cooldownUntil: Double = 0
     private var lastSampleRate: Double = 0
     private var isInjecting = false
     private var lastTriggerLevel: Float = 0
     private var highPassLastInput: Float = 0
     private var highPassLastOutput: Float = 0
+    private let gateHighPassCutoff: Float = 180
 
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
     private var duckingLevel: Float = 1.0
+    private var lastCurvedLevel: Float = 0
     private var lastEchoTriggerTime: Double = 0
     private var pendingStartWorkItem: DispatchWorkItem?
 
@@ -635,109 +932,99 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         restoreSettings()
     }
 
-    func selectPreset(_ preset: SpatialPresetID) {
-        selectedPreset = preset
-        applyPreset(preset.preset)
-        persistPreset(preset)
+    func resetEchoDefaults() {
+        echoInputGain = EchoDefaults.inputGain
+        echoInputCurve = EchoDefaults.inputCurve
+        echoInputFloor = EchoDefaults.inputFloor
+        echoGateThreshold = EchoDefaults.gateThreshold
+        echoGateAttack = EchoDefaults.gateAttack
+        echoGateRelease = EchoDefaults.gateRelease
+        echoMasterOutput = EchoDefaults.masterOutput
+        echoOutputRatio = EchoDefaults.outputRatio
+        echoWetOnly = EchoDefaults.wetOnly
+        echoWetMixBase = EchoDefaults.wetMixBase
+        echoWetMixRange = EchoDefaults.wetMixRange
+        echoDelayTime = EchoDefaults.delayTime
+        echoFeedback = EchoDefaults.feedback
+        echoLowPassCutoff = EchoDefaults.lowPassCutoff
+        echoBoostDb = EchoDefaults.boostDb
+        duckingStrength = EchoDefaults.duckingStrength
+        duckingResponse = EchoDefaults.duckingResponse
+        duckingLevelScale = EchoDefaults.duckingLevelScale
+        duckingDelay = EchoDefaults.duckingDelay
+        echoTriggerRise = EchoDefaults.triggerRise
+        echoRetriggerInterval = EchoDefaults.retriggerInterval
+        echoHoldDuration = EchoDefaults.holdDuration
     }
 
     private func restoreSettings() {
+        isRestoringSettings = true
         let storedVersion = UserDefaults.standard.integer(forKey: Self.settingsVersionKey)
         if storedVersion != Self.settingsVersion {
+            isRestoringSettings = false
+            resetEchoDefaults()
             UserDefaults.standard.set(Self.settingsVersion, forKey: Self.settingsVersionKey)
-            selectPreset(.optionA)
             return
         }
-        if let stored = UserDefaults.standard.string(forKey: Self.presetKey),
-           let preset = SpatialPresetID(rawValue: stored) {
-            selectPreset(preset)
-        } else {
-            selectPreset(.optionA)
+        echoInputGain = loadFloat(.inputGain, fallback: EchoDefaults.inputGain)
+        echoInputCurve = loadFloat(.inputCurve, fallback: EchoDefaults.inputCurve)
+        echoInputFloor = loadFloat(.inputFloor, fallback: EchoDefaults.inputFloor)
+        echoGateThreshold = loadFloat(.gateThreshold, fallback: EchoDefaults.gateThreshold)
+        echoGateAttack = loadFloat(.gateAttack, fallback: EchoDefaults.gateAttack)
+        echoGateRelease = loadFloat(.gateRelease, fallback: EchoDefaults.gateRelease)
+        echoMasterOutput = loadFloat(.masterOutput, fallback: EchoDefaults.masterOutput)
+        echoOutputRatio = loadFloat(.outputRatio, fallback: EchoDefaults.outputRatio)
+        echoWetOnly = loadBool(.wetOnly, fallback: EchoDefaults.wetOnly)
+        echoWetMixBase = loadFloat(.wetMixBase, fallback: EchoDefaults.wetMixBase)
+        echoWetMixRange = loadFloat(.wetMixRange, fallback: EchoDefaults.wetMixRange)
+        echoDelayTime = loadDouble(.delayTime, fallback: EchoDefaults.delayTime)
+        echoFeedback = loadFloat(.feedback, fallback: EchoDefaults.feedback)
+        echoLowPassCutoff = loadFloat(.lowPassCutoff, fallback: EchoDefaults.lowPassCutoff)
+        echoBoostDb = loadFloat(.boostDb, fallback: EchoDefaults.boostDb)
+        duckingStrength = loadFloat(.duckingStrength, fallback: EchoDefaults.duckingStrength)
+        duckingResponse = loadFloat(.duckingResponse, fallback: EchoDefaults.duckingResponse)
+        duckingLevelScale = loadFloat(.duckingLevelScale, fallback: EchoDefaults.duckingLevelScale)
+        duckingDelay = loadDouble(.duckingDelay, fallback: EchoDefaults.duckingDelay)
+        echoTriggerRise = loadFloat(.triggerRise, fallback: EchoDefaults.triggerRise)
+        echoRetriggerInterval = loadDouble(.retriggerInterval, fallback: EchoDefaults.retriggerInterval)
+        echoHoldDuration = loadDouble(.holdDuration, fallback: EchoDefaults.holdDuration)
+        isRestoringSettings = false
+    }
+
+    private func persistSetting(_ key: EchoSettingKey, value: Float) {
+        guard !isRestoringSettings else { return }
+        UserDefaults.standard.set(NSNumber(value: value), forKey: key.rawValue)
+    }
+
+    private func persistSetting(_ key: EchoSettingKey, value: Double) {
+        guard !isRestoringSettings else { return }
+        UserDefaults.standard.set(NSNumber(value: value), forKey: key.rawValue)
+    }
+
+    private func persistSetting(_ key: EchoSettingKey, value: Bool) {
+        guard !isRestoringSettings else { return }
+        UserDefaults.standard.set(value, forKey: key.rawValue)
+    }
+
+    private func loadFloat(_ key: EchoSettingKey, fallback: Float) -> Float {
+        guard let number = UserDefaults.standard.object(forKey: key.rawValue) as? NSNumber else {
+            return fallback
         }
+        return number.floatValue
     }
 
-    private func persistPreset(_ preset: SpatialPresetID) {
-        UserDefaults.standard.set(preset.rawValue, forKey: Self.presetKey)
-    }
-
-    private func applyPreset(_ preset: SpatialPreset) {
-        echoInputGain = preset.inputGain
-        echoInputCurve = preset.inputCurve
-        echoInputFloor = preset.inputFloor
-        echoGateThreshold = preset.gateThreshold
-        echoGateAttack = preset.gateAttack
-        echoGateRelease = preset.gateRelease
-        echoMasterOutput = preset.masterOutput
-        echoOutputRatio = preset.outputRatio
-        echoWetOnly = preset.wetOnly
-        echoWetMixBase = preset.wetMixBase
-        echoWetMixRange = preset.wetMixRange
-        echoDelayTime = preset.delayTime
-        echoFeedback = preset.feedback
-        echoLowPassCutoff = preset.lowPassCutoff
-        echoBoostDb = preset.boostDb
-        duckingStrength = preset.duckingStrength
-        duckingResponse = preset.duckingResponse
-        duckingLevelScale = preset.duckingLevelScale
-        duckingDelay = preset.duckingDelay
-        echoTriggerRise = preset.triggerRise
-        echoRetriggerInterval = preset.retriggerInterval
-        echoHoldDuration = preset.holdDuration
-        gateHighPassCutoff = preset.gateHighPassCutoff
-        hardDeafen = preset.hardDeafen
-        bleedTauUp = preset.bleedTauUp
-        bleedTauDown = preset.bleedTauDown
-        bleedUpStepCap = preset.bleedUpStepCap
-        floorMul = preset.floorMul
-        threshMul = preset.threshMul
-        threshBias = preset.threshBias
-        riseMinWhenEchoActive = preset.riseMinWhenEchoActive
-
-        resetGateState()
-        updatePlaybackNodes()
-    }
-
-    private func resetGateState() {
-        echoActiveUntil = 0
-        hardDeafenUntil = 0
-        nextTriggerAllowedAt = 0
-        bleedEMA = 0
-        lastGateSignal = 0
-        lastGateUpdateTime = 0
-        lastTriggerLevel = 0
-        echoMix = 0
-        duckingLevel = 1.0
-        lastEchoTriggerTime = 0
-    }
-
-    private func updatePlaybackNodes() {
-        delayNode?.delayTime = echoDelayTime.clamped(to: 0.0...2.0)
-        delayNode?.feedback = echoFeedback.clamped(to: -100.0...100.0)
-        delayNode?.lowPassCutoff = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
-        boostNode?.globalGain = echoBoostDb.clamped(to: -96.0...24.0)
-        if let limiterNode {
-            configureLimiter(limiterNode)
+    private func loadDouble(_ key: EchoSettingKey, fallback: Double) -> Double {
+        guard let number = UserDefaults.standard.object(forKey: key.rawValue) as? NSNumber else {
+            return fallback
         }
+        return number.doubleValue
     }
 
-    private func makeLimiter() -> AVAudioUnitEffect {
-        let description = AudioComponentDescription(componentType: kAudioUnitType_Effect,
-                                                    componentSubType: kAudioUnitSubType_DynamicsProcessor,
-                                                    componentManufacturer: kAudioUnitManufacturer_Apple,
-                                                    componentFlags: 0,
-                                                    componentFlagsMask: 0)
-        let limiter = AVAudioUnitEffect(audioComponentDescription: description)
-        configureLimiter(limiter)
-        return limiter
-    }
-
-    private func configureLimiter(_ limiter: AVAudioUnitEffect) {
-        let unit = limiter.audioUnit
-        AudioUnitSetParameter(unit, kDynamicsProcessorParam_Threshold, kAudioUnitScope_Global, 0, -10, 0)
-        AudioUnitSetParameter(unit, kDynamicsProcessorParam_HeadRoom, kAudioUnitScope_Global, 0, 3, 0)
-        AudioUnitSetParameter(unit, kDynamicsProcessorParam_AttackTime, kAudioUnitScope_Global, 0, 0.001, 0)
-        AudioUnitSetParameter(unit, kDynamicsProcessorParam_ReleaseTime, kAudioUnitScope_Global, 0, 0.060, 0)
-        AudioUnitSetParameter(unit, kDynamicsProcessorParam_OverallGain, kAudioUnitScope_Global, 0, 0, 0)
+    private func loadBool(_ key: EchoSettingKey, fallback: Bool) -> Bool {
+        guard let number = UserDefaults.standard.object(forKey: key.rawValue) as? NSNumber else {
+            return fallback
+        }
+        return number.boolValue
     }
 
     func startListening(after delay: TimeInterval = 0) {
@@ -757,7 +1044,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
     private func startListeningNow() {
         guard !isListening else { return }
-        resetGateState()
 
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
@@ -770,29 +1056,18 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
-    func stopListening(completion: (() -> Void)? = nil) {
+    func stopListening() {
         pendingStartWorkItem?.cancel()
         pendingStartWorkItem = nil
         isListening = false
         let sessionToStop = captureSession
-        let inputToStop = captureInput
         let outputToStop = captureOutput
         captureSession = nil
         captureInput = nil
         captureOutput = nil
         captureQueue.async { [weak self] in
             outputToStop?.setSampleBufferDelegate(nil, queue: nil)
-            if let sessionToStop = sessionToStop {
-                sessionToStop.beginConfiguration()
-                if let outputToStop = outputToStop {
-                    sessionToStop.removeOutput(outputToStop)
-                }
-                if let inputToStop = inputToStop {
-                    sessionToStop.removeInput(inputToStop)
-                }
-                sessionToStop.commitConfiguration()
-                sessionToStop.stopRunning()
-            }
+            sessionToStop?.stopRunning()
             self?.isCapturing = false
             self?.isInjecting = false
             self?.captureSamples.removeAll()
@@ -800,15 +1075,15 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self?.preRollBuffer.removeAll()
             self?.preRollIndex = 0
             self?.preRollFilled = false
+            self?.cooldownUntil = 0
             self?.lastSampleRate = 0
             self?.highPassLastInput = 0
             self?.highPassLastOutput = 0
             self?.lastTriggerLevel = 0
-            self?.resetGateState()
+            self?.echoMix = 0
             self?.stopPlaybackEngine()
             DispatchQueue.main.async { [weak self] in
                 self?.deactivateAudioSession()
-                completion?()
             }
         }
     }
@@ -816,12 +1091,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private func startSpatialCapture() {
         do {
             deactivateAudioSession()
-            guard configureCaptureAudioSession() else {
-                return
-            }
             let sessionCapture = AVCaptureSession()
             sessionCapture.usesApplicationAudioSession = true
-            sessionCapture.automaticallyConfiguresApplicationAudioSession = false
+            sessionCapture.automaticallyConfiguresApplicationAudioSession = true
             sessionCapture.beginConfiguration()
 
             guard let device = AVCaptureDevice.default(for: .audio) else {
@@ -830,19 +1102,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             }
 
             let input = try AVCaptureDeviceInput(device: device)
-            let desiredMode: AVCaptureMultichannelAudioMode
-            if input.isMultichannelAudioModeSupported(.firstOrderAmbisonics) {
-                desiredMode = .firstOrderAmbisonics
-            } else if input.isMultichannelAudioModeSupported(.stereo) {
-                desiredMode = .stereo
-            } else {
-                desiredMode = .none
-            }
-            if desiredMode != .none {
-                input.multichannelAudioMode = desiredMode
-            } else {
-                print("Spatial capture unavailable; using mono input.")
-            }
+            input.multichannelAudioMode = .firstOrderAmbisonics
             guard sessionCapture.canAddInput(input) else {
                 print("Unable to add audio capture input")
                 return
@@ -850,11 +1110,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             sessionCapture.addInput(input)
 
             let output = AVCaptureAudioDataOutput()
-            if desiredMode == .firstOrderAmbisonics {
-                output.spatialAudioChannelLayoutTag = foaLayoutTag
-            } else {
-                output.spatialAudioChannelLayoutTag = kAudioChannelLayoutTag_Unknown
-            }
+            output.spatialAudioChannelLayoutTag = foaLayoutTag
             output.setSampleBufferDelegate(self, queue: captureQueue)
             guard sessionCapture.canAddOutput(output) else {
                 print("Unable to add audio capture output")
@@ -869,6 +1125,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             captureOutput = output
             isListening = true
 
+            applyPlaybackOverrides()
+
             captureQueue.async {
                 sessionCapture.startRunning()
             }
@@ -877,17 +1135,18 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
-    private func configureCaptureAudioSession() -> Bool {
+    private func applyPlaybackOverrides() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
             try session.setPreferredInputNumberOfChannels(4)
-            try session.setActive(true)
-            try session.overrideOutputAudioPort(.speaker)
-            return true
         } catch {
-            print("Failed to configure audio session: \(error)")
-            return false
+            print("Failed to set preferred input channels: \(error)")
+        }
+
+        do {
+            try session.overrideOutputAudioPort(.speaker)
+        } catch {
+            print("Failed to override audio output: \(error)")
         }
     }
 
@@ -898,11 +1157,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         } catch {
             print("Aurora audio deactivation failed: \(error)")
         }
-        do {
-            try session.setPreferredInputNumberOfChannels(1)
-        } catch {
-            print("Aurora input channel reset failed: \(error)")
-        }
     }
 
     private func stopPlaybackEngine() {
@@ -912,7 +1166,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         gateMixer = nil
         delayNode = nil
         boostNode = nil
-        limiterNode = nil
         playbackFormat = nil
         isInjecting = false
     }
@@ -934,22 +1187,22 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         gateMixer.outputVolume = 0
 
         let delay = AVAudioUnitDelay()
+        delay.delayTime = echoDelayTime.clamped(to: 0.0...2.0)
+        delay.feedback = echoFeedback.clamped(to: -100.0...100.0)
+        delay.lowPassCutoff = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
         delay.wetDryMix = 50
 
         let boost = AVAudioUnitEQ(numberOfBands: 1)
-
-        let limiter = makeLimiter()
+        boost.globalGain = echoBoostDb.clamped(to: -96.0...24.0)
 
         engine.attach(player)
         engine.attach(gateMixer)
         engine.attach(delay)
         engine.attach(boost)
-        engine.attach(limiter)
         engine.connect(player, to: gateMixer, format: format)
         engine.connect(gateMixer, to: delay, format: format)
         engine.connect(delay, to: boost, format: format)
-        engine.connect(boost, to: limiter, format: format)
-        engine.connect(limiter, to: engine.mainMixerNode, format: format)
+        engine.connect(boost, to: engine.mainMixerNode, format: format)
 
         engine.prepare()
         do {
@@ -960,9 +1213,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self.gateMixer = gateMixer
             self.delayNode = delay
             self.boostNode = boost
-            self.limiterNode = limiter
             self.playbackFormat = format
-            self.updatePlaybackNodes()
             return true
         } catch {
             print("Aurora playback engine failed: \(error)")
@@ -1049,32 +1300,21 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let now = CFAbsoluteTimeGetCurrent()
         let gateThreshold = echoGateThreshold.clamped(to: 0.0...2.0)
         let triggerRise = max(0, echoTriggerRise)
+        let retriggerInterval = max(0, echoRetriggerInterval)
         let holdDuration = max(0, echoHoldDuration)
-
-        updateBleedEstimate(gateSignal: curvedLevel, now: now)
-
-        var dynamicFloor = inputFloor
-        var dynamicThreshold = gateThreshold
-        var dynamicRise = triggerRise
-        if now < echoActiveUntil {
-            dynamicFloor = max(dynamicFloor, bleedEMA * floorMul)
-            dynamicThreshold = max(dynamicThreshold, bleedEMA * threshMul + threshBias)
-            dynamicRise = max(dynamicRise, riseMinWhenEchoActive)
-        }
-
-        let gateSignal: Float = normalizedLevel < dynamicFloor ? 0 : pow(normalizedLevel, inputCurve)
-        let rise = gateSignal - lastGateSignal
-        lastGateSignal = gateSignal
-
-        let canTrigger = !isCapturing && now >= hardDeafenUntil && now >= nextTriggerAllowedAt
-        if canTrigger && gateSignal > dynamicThreshold && rise > dynamicRise {
-            lastTriggerLevel = gateSignal
+        let levelRise = curvedLevel - lastCurvedLevel
+        let canTrigger = now >= cooldownUntil
+        let triggerEcho = !isCapturing && curvedLevel > gateThreshold && levelRise > triggerRise && canTrigger
+        if triggerEcho {
+            lastEchoTriggerTime = now
+            cooldownUntil = now + retriggerInterval
+            lastTriggerLevel = curvedLevel
             beginCapture(preRoll: snapshotPreRoll(),
                          holdDuration: holdDuration,
                          sampleRate: sampleRate)
         }
 
-        let targetEcho: Float = now < echoActiveUntil ? 1.0 : 0.0
+        let targetEcho: Float = now < cooldownUntil ? 1.0 : 0.0
         let attackSeconds = max(0.01, Double(echoGateAttack))
         let releaseSeconds = max(0.01, Double(echoGateRelease))
         let attackCoeff = exp(-frameDuration / attackSeconds)
@@ -1129,6 +1369,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self.sourcePoint = CGPoint(x: nextX, y: nextY)
         }
 
+        lastCurvedLevel = curvedLevel
     }
 
     private func configurePreRoll(sampleRate: Double) {
@@ -1214,51 +1455,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             }
         }
         playerNode.play()
-        onEchoInjected(at: CFAbsoluteTimeGetCurrent())
-    }
-
-    private func onEchoInjected(at now: Double) {
-        let delayTime = echoDelayTime.clamped(to: 0.0...2.0)
-        let feedback = echoFeedback.clamped(to: -100.0...100.0)
-        let tail = estimatedTailDuration(delayTime: delayTime, feedback: feedback)
-        let retriggerInterval = max(0, echoRetriggerInterval)
-
-        nextTriggerAllowedAt = now + retriggerInterval
-        echoActiveUntil = max(echoActiveUntil, now + tail)
-        hardDeafenUntil = max(hardDeafenUntil, now + delayTime + hardDeafen)
-        lastEchoTriggerTime = now
-    }
-
-    private func estimatedTailDuration(delayTime: Double, feedback: Float) -> Double {
-        let magnitude = abs(feedback) / 100.0
-        guard magnitude > 0.001 else {
-            return delayTime + 0.15
-        }
-        let fb = min(0.99, max(0.01, Double(magnitude)))
-        let target = 0.01
-        let repeats = ceil(log(target) / log(fb))
-        if repeats.isInfinite || repeats.isNaN {
-            return delayTime + 0.15
-        }
-        return delayTime * max(0, repeats) + 0.15
-    }
-
-    private func updateBleedEstimate(gateSignal: Float, now: Double) {
-        if lastGateUpdateTime == 0 {
-            lastGateUpdateTime = now
-        }
-        let dt = max(0.001, now - lastGateUpdateTime)
-        lastGateUpdateTime = now
-
-        if now < echoActiveUntil {
-            let cappedTarget = min(gateSignal, bleedEMA + bleedUpStepCap)
-            let tau = cappedTarget > bleedEMA ? bleedTauUp : bleedTauDown
-            let safeTau = max(0.001, tau)
-            let alpha = Float(1.0 - exp(-dt / Double(safeTau)))
-            bleedEMA += alpha * (cappedTarget - bleedEMA)
-        } else {
-            bleedEMA *= 0.90
-        }
     }
 
     private func highPassCoefficient(sampleRate: Double, cutoff: Double) -> Float {
@@ -1336,22 +1532,24 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
         let bufferList = UnsafeMutableAudioBufferListPointer(audioBufferList)
         let sampleRate = asbd.pointee.mSampleRate
         guard sampleRate > 0 else { return }
-        guard channelCount >= 1 else { return }
+        guard channelCount >= 4 else { return }
 
         if isFloat {
             if isNonInterleaved {
-                guard let w = bufferList.first?.mData?.assumingMemoryBound(to: Float.self) else {
+                guard bufferList.count >= 4,
+                      let w = bufferList[0].mData?.assumingMemoryBound(to: Float.self),
+                      let y = bufferList[1].mData?.assumingMemoryBound(to: Float.self),
+                      let z = bufferList[2].mData?.assumingMemoryBound(to: Float.self),
+                      let x = bufferList[3].mData?.assumingMemoryBound(to: Float.self) else {
                     return
                 }
-                let y = bufferList.count > 1 ? bufferList[1].mData?.assumingMemoryBound(to: Float.self) : nil
-                let z = bufferList.count > 2 ? bufferList[2].mData?.assumingMemoryBound(to: Float.self) : nil
-                let x = bufferList.count > 3 ? bufferList[3].mData?.assumingMemoryBound(to: Float.self) : nil
+
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return w[index]
-                    case 1: return y?[index] ?? 0
-                    case 2: return z?[index] ?? 0
-                    default: return x?[index] ?? 0
+                    case 1: return y[index]
+                    case 2: return z[index]
+                    default: return x[index]
                     }
                 }
             } else {
@@ -1361,27 +1559,26 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
                 }
 
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
-                    if channel < channelCount {
-                        return data[index * channelCount + channel]
-                    }
-                    return 0
+                    data[index * channelCount + channel]
                 }
             }
         } else if asbd.pointee.mBitsPerChannel == 16 {
             if isNonInterleaved {
-                guard let w = bufferList.first?.mData?.assumingMemoryBound(to: Int16.self) else {
+                guard bufferList.count >= 4,
+                      let w = bufferList[0].mData?.assumingMemoryBound(to: Int16.self),
+                      let y = bufferList[1].mData?.assumingMemoryBound(to: Int16.self),
+                      let z = bufferList[2].mData?.assumingMemoryBound(to: Int16.self),
+                      let x = bufferList[3].mData?.assumingMemoryBound(to: Int16.self) else {
                     return
                 }
-                let y = bufferList.count > 1 ? bufferList[1].mData?.assumingMemoryBound(to: Int16.self) : nil
-                let z = bufferList.count > 2 ? bufferList[2].mData?.assumingMemoryBound(to: Int16.self) : nil
-                let x = bufferList.count > 3 ? bufferList[3].mData?.assumingMemoryBound(to: Int16.self) : nil
+
                 let scale = 1.0 / Float(Int16.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return Float(w[index]) * scale
-                    case 1: return Float(y?[index] ?? 0) * scale
-                    case 2: return Float(z?[index] ?? 0) * scale
-                    default: return Float(x?[index] ?? 0) * scale
+                    case 1: return Float(y[index]) * scale
+                    case 2: return Float(z[index]) * scale
+                    default: return Float(x[index]) * scale
                     }
                 }
             } else {
@@ -1392,27 +1589,26 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
 
                 let scale = 1.0 / Float(Int16.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
-                    if channel < channelCount {
-                        return Float(data[index * channelCount + channel]) * scale
-                    }
-                    return 0
+                    Float(data[index * channelCount + channel]) * scale
                 }
             }
         } else if asbd.pointee.mBitsPerChannel == 32 {
             if isNonInterleaved {
-                guard let w = bufferList.first?.mData?.assumingMemoryBound(to: Int32.self) else {
+                guard bufferList.count >= 4,
+                      let w = bufferList[0].mData?.assumingMemoryBound(to: Int32.self),
+                      let y = bufferList[1].mData?.assumingMemoryBound(to: Int32.self),
+                      let z = bufferList[2].mData?.assumingMemoryBound(to: Int32.self),
+                      let x = bufferList[3].mData?.assumingMemoryBound(to: Int32.self) else {
                     return
                 }
-                let y = bufferList.count > 1 ? bufferList[1].mData?.assumingMemoryBound(to: Int32.self) : nil
-                let z = bufferList.count > 2 ? bufferList[2].mData?.assumingMemoryBound(to: Int32.self) : nil
-                let x = bufferList.count > 3 ? bufferList[3].mData?.assumingMemoryBound(to: Int32.self) : nil
+
                 let scale = 1.0 / Float(Int32.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
                     switch channel {
                     case 0: return Float(w[index]) * scale
-                    case 1: return Float(y?[index] ?? 0) * scale
-                    case 2: return Float(z?[index] ?? 0) * scale
-                    default: return Float(x?[index] ?? 0) * scale
+                    case 1: return Float(y[index]) * scale
+                    case 2: return Float(z[index]) * scale
+                    default: return Float(x[index]) * scale
                     }
                 }
             } else {
@@ -1423,10 +1619,7 @@ extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {
 
                 let scale = 1.0 / Float(Int32.max)
                 processSpatialSamples(frames: frames, sampleRate: sampleRate) { index, channel in
-                    if channel < channelCount {
-                        return Float(data[index * channelCount + channel]) * scale
-                    }
-                    return 0
+                    Float(data[index * channelCount + channel]) * scale
                 }
             }
         }
@@ -1457,5 +1650,4 @@ private extension Float {
 
 #Preview {
     VoiceAuroraView()
-        .environmentObject(AudioCoordinator())
 }
