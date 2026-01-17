@@ -34,6 +34,7 @@ struct HighContrastMobileView: View {
     @State private var resizingShapeIndex: Int? = nil
     @State private var resizeStartScale: CGFloat = 1.0
     @State private var resizeStartPoint: CGPoint = .zero
+    @State private var resizeStartBaseline: CGFloat = 0.0
 
     // Animation state
     @State private var shapes: [ShapeState] = []
@@ -48,7 +49,7 @@ struct HighContrastMobileView: View {
     private let minShapeScale: CGFloat = 0.6
     private let maxShapeScale: CGFloat = 1.8
     private let minBaselineSpeed: CGFloat = 0.0
-    private let maxBaselineSpeed: CGFloat = 240.0
+    private let maxBaselineSpeed: CGFloat = 960.0
     private let minBaseSize: CGFloat = 0.12
     private let maxBaseSize: CGFloat = 0.24
     private let initialShapeCount = 5
@@ -126,14 +127,18 @@ struct HighContrastMobileView: View {
                         resizingShapeIndex = index
                         resizeStartScale = shapes[index].sizeScale
                         resizeStartPoint = start
+                        resizeStartBaseline = shapes[index].baselineSpeed
                         draggedShapeIndex = nil
                         dragVelocity = .zero
                     },
                     onResizeChanged: { translation in
                         guard isFrozen, let index = resizingShapeIndex else { return }
                         let sizeDelta = -translation.y / 180.0
+                        let speedAdjustmentScale = (maxBaselineSpeed - minBaselineSpeed) / 260.0
+                        let speedDelta = translation.x * speedAdjustmentScale
                         var shape = shapes[index]
                         shape.sizeScale = (resizeStartScale + sizeDelta).clamped(to: minShapeScale...maxShapeScale)
+                        shape.baselineSpeed = (resizeStartBaseline + speedDelta).clamped(to: minBaselineSpeed...maxBaselineSpeed)
                         shape.position = clampedPosition(for: shape, proposed: shape.position, in: screenSize)
                         shapes[index] = shape
                     },
@@ -167,10 +172,14 @@ struct HighContrastMobileView: View {
                     resizingShapeIndex = shapeIndex
                     resizeStartScale = shapes[shapeIndex].sizeScale
                     resizeStartPoint = location
+                    resizeStartBaseline = shapes[shapeIndex].baselineSpeed
                 }
                 let sizeDelta = -(location.y - resizeStartPoint.y) / 180.0
+                let speedAdjustmentScale = (maxBaselineSpeed - minBaselineSpeed) / 260.0
+                let speedDelta = (location.x - resizeStartPoint.x) * speedAdjustmentScale
                 var shape = shapes[shapeIndex]
                 shape.sizeScale = (resizeStartScale + sizeDelta).clamped(to: minShapeScale...maxShapeScale)
+                shape.baselineSpeed = (resizeStartBaseline + speedDelta).clamped(to: minBaselineSpeed...maxBaselineSpeed)
                 shape.position = clampedPosition(for: shape, proposed: shape.position, in: screenSize)
                 shapes[shapeIndex] = shape
                 lastDragPosition = location
