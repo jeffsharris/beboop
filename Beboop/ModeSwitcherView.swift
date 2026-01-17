@@ -5,6 +5,7 @@ struct ModeSwitcherView: View {
         case cozyCoos
         case driftDoodles
         case voiceAurora
+        case voiceAuroraClassic
 
         var id: String { rawValue }
 
@@ -16,6 +17,8 @@ struct ModeSwitcherView: View {
                 return "Drift Doodles"
             case .voiceAurora:
                 return "Voice Aurora"
+            case .voiceAuroraClassic:
+                return "Aurora Classic"
             }
         }
 
@@ -27,6 +30,8 @@ struct ModeSwitcherView: View {
                 return "circle.grid.2x2"
             case .voiceAurora:
                 return "sparkles"
+            case .voiceAuroraClassic:
+                return "circle"
             }
         }
     }
@@ -55,6 +60,8 @@ struct ModeSwitcherView: View {
             HighContrastMobileView()
         case .voiceAurora:
             VoiceAuroraView()
+        case .voiceAuroraClassic:
+            VoiceAuroraClassicView()
         }
     }
 

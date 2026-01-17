@@ -28,9 +28,13 @@ for Voice Aurora so future changes stay aligned with the experience.
 - The wave band is drawn as a noisy ring segment and then composited with multiple
   gradient stops to keep overlaps luminous (screen blend + blur for glow).
 - A live "Echo Tuning" panel is available in the Voice Aurora UI (slider icon at
-  bottom-left). Use it to adjust echo parameters on-device while listening.
+  bottom-left). Use it to adjust echo parameters on-device while listening. Settings
+  persist across launches.
 - The panel includes Master Output (to hard-mute the echo) and a Wet Only toggle
   (to remove dry monitoring from the delay unit).
+- Input Mapping includes a 2D pad (gain vs curve) plus a curve preview so you can
+  see how mic level maps into the gate/echo.
+- Echo Tail includes a 2D pad (delay vs feedback) for quick decay/spacing tuning.
 - "Input Floor" sets the minimum normalized level required before the echo gate
   reacts, so taps and desk noise are ignored.
 
@@ -59,6 +63,8 @@ Tuning notes:
   or raise `echoTriggerRise`.
 - If the first echo feels too soft, increase `echoBoostDb` or `echoWetMixBase`.
 - If repeats feel too dense, increase `echoDelayTime` and/or lower `echoFeedback`.
+- If the echo never gates off, raise `echoInputFloor` or `echoGateThreshold`, or
+  set Master Output to 0 to confirm the output is muted.
 
 ## Spatial audio capture and direction
 
@@ -89,6 +95,13 @@ Tuning notes:
 - After the capture session starts, apply only minimal playback overrides (speaker
   output, preferred input channel count). Avoid forcing voice processing or custom
   audio session modes that can collapse FOA.
+
+## Classic mode (VoiceAuroraClassicView)
+
+- "Aurora Classic" uses the original voice chat pipeline (`AVAudioEngine` input tap
+  + `AVAudioSession` `.voiceChat`) to keep Apple’s echo cancellation and AGC active.
+- Waves always emanate from the bottom center, so there is no spatial direction
+  logic in this mode.
 
 ## Quick troubleshooting checklist
 
