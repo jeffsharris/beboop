@@ -4,6 +4,7 @@ import UIKit
 import CoreMotion
 
 struct HighContrastMobileView: View {
+    @EnvironmentObject private var audioCoordinator: AudioCoordinator
     private struct ShapeState: Identifiable {
         enum Kind: CaseIterable {
             case circle
@@ -89,7 +90,14 @@ struct HighContrastMobileView: View {
                     wallOffset = .zero
                     wallVelocity = .zero
                     motionController.start()
-                    chimePlayer.start(after: AudioHandoff.startDelay)
+                    audioCoordinator.register(mode: .driftDoodles,
+                                              start: {
+                                                  chimePlayer.start()
+                                              },
+                                              stop: { completion in
+                                                  chimePlayer.stop()
+                                                  completion()
+                                              })
                 }
                 .onChange(of: geometry.size) { _, newSize in
                     let oldSize = screenSize
@@ -99,7 +107,7 @@ struct HighContrastMobileView: View {
                 }
                 .onDisappear {
                     motionController.stop()
-                    chimePlayer.stop()
+                    audioCoordinator.unregister(mode: .driftDoodles)
                 }
                 .gesture(combinedGesture)
             }
@@ -111,9 +119,6 @@ struct HighContrastMobileView: View {
                 onDoubleTap: handleTwoFingerDoubleTap
             )
             .ignoresSafeArea()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
-            chimePlayer.stop()
         }
     }
 
@@ -1094,4 +1099,5 @@ final class ChimePlayer: ObservableObject {
 
 #Preview {
     HighContrastMobileView()
+        .environmentObject(AudioCoordinator())
 }

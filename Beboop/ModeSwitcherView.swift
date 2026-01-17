@@ -1,44 +1,9 @@
 import SwiftUI
 
 struct ModeSwitcherView: View {
-    private enum AppMode: String, CaseIterable, Identifiable {
-        case cozyCoos
-        case driftDoodles
-        case voiceAurora
-        case voiceAuroraClassic
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .cozyCoos:
-                return "Cozy Coos"
-            case .driftDoodles:
-                return "Drift Doodles"
-            case .voiceAurora:
-                return "Spatial Voice"
-            case .voiceAuroraClassic:
-                return "Aurora Voice"
-            }
-        }
-
-        var iconName: String {
-            switch self {
-            case .cozyCoos:
-                return "waveform"
-            case .driftDoodles:
-                return "circle.grid.2x2"
-            case .voiceAurora:
-                return "sparkles"
-            case .voiceAuroraClassic:
-                return "circle"
-            }
-        }
-    }
-
+    @EnvironmentObject private var audioCoordinator: AudioCoordinator
     @AppStorage("lastActiveMode") private var storedMode = AppMode.cozyCoos.rawValue
     @State private var isMenuPresented = false
-    @State private var pendingModeWorkItem: DispatchWorkItem?
 
     var body: some View {
         ZStack {
@@ -50,6 +15,12 @@ struct ModeSwitcherView: View {
             if isMenuPresented {
                 menuOverlay
             }
+        }
+        .onAppear {
+            audioCoordinator.requestMode(activeMode)
+        }
+        .onChange(of: activeMode) { _, newMode in
+            audioCoordinator.requestMode(newMode)
         }
     }
 
@@ -108,14 +79,7 @@ struct ModeSwitcherView: View {
 
                 ForEach(AppMode.allCases) { mode in
                     Button {
-                        pendingModeWorkItem?.cancel()
-                        AudioHandoff.notifyStop()
-                        let workItem = DispatchWorkItem {
-                            storedMode = mode.rawValue
-                        }
-                        pendingModeWorkItem = workItem
-                        DispatchQueue.main.asyncAfter(deadline: .now() + AudioHandoff.switchDelay,
-                                                      execute: workItem)
+                        storedMode = mode.rawValue
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isMenuPresented = false
                         }
@@ -157,4 +121,5 @@ struct ModeSwitcherView: View {
 
 #Preview {
     ModeSwitcherView()
+        .environmentObject(AudioCoordinator())
 }
