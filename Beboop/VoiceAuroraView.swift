@@ -387,12 +387,14 @@ struct VoiceAuroraView: View {
                                   value: floatBinding(\.echoGateAttack),
                                   range: 0.05...0.99,
                                   step: 0.02,
-                                  format: "%.2f")
+                                  format: "%.2f",
+                                  suffix: "s")
                         sliderRow(title: "Gate Release",
                                   value: floatBinding(\.echoGateRelease),
                                   range: 0.05...0.99,
                                   step: 0.02,
-                                  format: "%.2f")
+                                  format: "%.2f",
+                                  suffix: "s")
 
                         sliderSectionHeader("Trigger")
                         sliderRow(title: "Trigger Rise",
@@ -406,7 +408,7 @@ struct VoiceAuroraView: View {
                                   step: 0.1,
                                   format: "%.2f",
                                   suffix: "s")
-                        sliderRow(title: "Hold Duration",
+                        sliderRow(title: "Capture Duration",
                                   value: doubleBinding(\.echoHoldDuration),
                                   range: 0.0...2.0,
                                   step: 0.05,
@@ -761,26 +763,29 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         static let inputGain: Float = 8.0
         static let inputCurve: Float = 0.7
         static let inputFloor: Float = 0.08
-        static let gateThreshold: Float = 0.1
-        static let gateAttack: Float = 0.75
-        static let gateRelease: Float = 0.8
-        static let masterOutput: Float = 1.0
-        static let outputRatio: Float = 0.0
-        static let wetOnly: Bool = false
-        static let wetMixBase: Float = 85
-        static let wetMixRange: Float = 15
-        static let delayTime: Double = 0.7
-        static let feedback: Float = 18
-        static let lowPassCutoff: Float = 9000
-        static let boostDb: Float = 18
+        static let gateThreshold: Float = 0.22
+        static let gateAttack: Float = 0.06
+        static let gateRelease: Float = 0.22
+        static let masterOutput: Float = 0.55
+        static let outputRatio: Float = 0.65
+        static let wetOnly: Bool = true
+        static let wetMixBase: Float = 0
+        static let wetMixRange: Float = 85
+        static let delayTime: Double = 0.28
+        static let feedback: Float = 48
+        static let lowPassCutoff: Float = 6000
+        static let boostDb: Float = 3
         static let duckingStrength: Float = 0.65
-        static let duckingResponse: Float = 0.22
-        static let duckingLevelScale: Float = 0.8
-        static let duckingDelay: Double = 0.12
-        static let triggerRise: Float = 0.02
-        static let retriggerInterval: Double = 1.0
-        static let holdDuration: Double = 0.55
+        static let duckingResponse: Float = 0.05
+        static let duckingLevelScale: Float = 1.0
+        static let duckingDelay: Double = 0.0
+        static let triggerRise: Float = 0.08
+        static let retriggerInterval: Double = 2.6
+        static let holdDuration: Double = 0.35
     }
+
+    private static let settingsVersion = 2
+    private static let settingsVersionKey = "voiceAurora.echo.settingsVersion"
 
     private enum EchoSettingKey: String {
         case inputGain = "voiceAurora.echo.inputGain"
@@ -892,13 +897,25 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var delayNode: AVAudioUnitDelay?
     private var boostNode: AVAudioUnitEQ?
     private var playbackFormat: AVAudioFormat?
-    private var pendingBuffers = 0
-    private let maxPendingBuffers = 4
     private var isListening = false
     private var levelHistory: [Float] = []
     private let levelHistorySize = 8
     private var echoMix: Float = 0
     private var lastDirectionPoint = CGPoint(x: 0.5, y: 0.85)
+    private var captureSamples: [Float] = []
+    private var captureTargetSamples = 0
+    private var isCapturing = false
+    private var preRollBuffer: [Float] = []
+    private var preRollIndex = 0
+    private var preRollFilled = false
+    private let preRollDuration: Double = 0.05
+    private var cooldownUntil: Double = 0
+    private var lastSampleRate: Double = 0
+    private var isInjecting = false
+    private var lastTriggerLevel: Float = 0
+    private var highPassLastInput: Float = 0
+    private var highPassLastOutput: Float = 0
+    private let gateHighPassCutoff: Float = 180
 
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
@@ -938,6 +955,13 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
     private func restoreSettings() {
         isRestoringSettings = true
+        let storedVersion = UserDefaults.standard.integer(forKey: Self.settingsVersionKey)
+        if storedVersion != Self.settingsVersion {
+            isRestoringSettings = false
+            resetEchoDefaults()
+            UserDefaults.standard.set(Self.settingsVersion, forKey: Self.settingsVersionKey)
+            return
+        }
         echoInputGain = loadFloat(.inputGain, fallback: EchoDefaults.inputGain)
         echoInputCurve = loadFloat(.inputCurve, fallback: EchoDefaults.inputCurve)
         echoInputFloor = loadFloat(.inputFloor, fallback: EchoDefaults.inputFloor)
@@ -1021,6 +1045,19 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         captureInput = nil
         captureOutput = nil
         captureQueue.async { [weak self] in
+            self?.isCapturing = false
+            self?.isInjecting = false
+            self?.captureSamples.removeAll()
+            self?.captureTargetSamples = 0
+            self?.preRollBuffer.removeAll()
+            self?.preRollIndex = 0
+            self?.preRollFilled = false
+            self?.cooldownUntil = 0
+            self?.lastSampleRate = 0
+            self?.highPassLastInput = 0
+            self?.highPassLastOutput = 0
+            self?.lastTriggerLevel = 0
+            self?.echoMix = 0
             self?.stopPlaybackEngine()
         }
         deactivateAudioSession()
@@ -1105,7 +1142,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         delayNode = nil
         boostNode = nil
         playbackFormat = nil
-        pendingBuffers = 0
+        isInjecting = false
     }
 
     @discardableResult
@@ -1163,18 +1200,21 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                        sampleRate: Double,
                                        sampleAt: (_ frame: Int, _ channel: Int) -> Float) {
         guard frames > 0, sampleRate > 0 else { return }
-        let canPlayback = ensurePlaybackEngine(sampleRate: sampleRate)
-        let frameCount = AVAudioFrameCount(frames)
-        var playbackBuffer: AVAudioPCMBuffer?
-        var playbackData: UnsafeMutablePointer<Float>?
-        if canPlayback, let playbackFormat = playbackFormat,
-           let buffer = AVAudioPCMBuffer(pcmFormat: playbackFormat, frameCapacity: frameCount),
-           let data = buffer.floatChannelData?.pointee {
-            playbackBuffer = buffer
-            playbackData = data
+        _ = ensurePlaybackEngine(sampleRate: sampleRate)
+
+        if abs(sampleRate - lastSampleRate) > 0.5 {
+            configurePreRoll(sampleRate: sampleRate)
+            lastSampleRate = sampleRate
+            highPassLastInput = 0
+            highPassLastOutput = 0
         }
 
+        let frameDuration = Double(frames) / sampleRate
+        let highPassAlpha = highPassCoefficient(sampleRate: sampleRate,
+                                                 cutoff: Double(gateHighPassCutoff))
+
         var sumW2: Float = 0
+        var sumGate2: Float = 0
         var sumXW: Float = 0
         var sumYW: Float = 0
         var sumZW: Float = 0
@@ -1187,14 +1227,20 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             let z = sampleAt(i, 2)
             let x = sampleAt(i, 3)
 
-            if let playbackData = playbackData {
-                playbackData[i] = w
-            }
-
             sumW2 += w * w
             sumXW += x * w
             sumYW += y * w
             sumZW += z * w
+
+            let filtered = highPassAlpha * (highPassLastOutput + w - highPassLastInput)
+            highPassLastInput = w
+            highPassLastOutput = filtered
+            sumGate2 += filtered * filtered
+
+            appendPreRollSample(w)
+            if isCapturing {
+                captureSamples.append(w)
+            }
 
             if i > 0 {
                 if (w >= 0 && previous < 0) || (w < 0 && previous >= 0) {
@@ -1204,12 +1250,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             previous = w
         }
 
-        if let playbackBuffer = playbackBuffer {
-            playbackBuffer.frameLength = frameCount
-            enqueuePlayback(playbackBuffer)
+        if isCapturing, captureSamples.count >= captureTargetSamples {
+            finalizeCapture(sampleRate: sampleRate)
         }
 
-        let rms = sqrt(sumW2 / Float(frames))
+        let rms = sqrt(sumGate2 / Float(frames))
         let inputGain = echoInputGain.clamped(to: 0.0...24.0)
         let inputCurve = echoInputCurve.clamped(to: 0.2...2.5)
         let normalizedLevel = min(1.0, rms * inputGain)
@@ -1229,24 +1274,30 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
         let now = CFAbsoluteTimeGetCurrent()
         let gateThreshold = echoGateThreshold.clamped(to: 0.0...2.0)
-        let gateAttack = echoGateAttack.clamped(to: 0.0...0.99)
-        let gateRelease = echoGateRelease.clamped(to: 0.0...0.99)
         let triggerRise = max(0, echoTriggerRise)
         let retriggerInterval = max(0, echoRetriggerInterval)
         let holdDuration = max(0, echoHoldDuration)
         let levelRise = curvedLevel - lastCurvedLevel
-        let canTrigger = now - lastEchoTriggerTime > retriggerInterval
-        let triggerEcho = curvedLevel > gateThreshold && levelRise > triggerRise && canTrigger
+        let canTrigger = now >= cooldownUntil
+        let triggerEcho = !isCapturing && curvedLevel > gateThreshold && levelRise > triggerRise && canTrigger
         if triggerEcho {
             lastEchoTriggerTime = now
+            cooldownUntil = now + retriggerInterval
+            lastTriggerLevel = curvedLevel
+            beginCapture(preRoll: snapshotPreRoll(),
+                         holdDuration: holdDuration,
+                         sampleRate: sampleRate)
         }
 
-        let holdActive = now - lastEchoTriggerTime < holdDuration
-        let targetEcho: Float = holdActive ? 1.0 : 0.0
+        let targetEcho: Float = now < cooldownUntil ? 1.0 : 0.0
+        let attackSeconds = max(0.01, Double(echoGateAttack))
+        let releaseSeconds = max(0.01, Double(echoGateRelease))
+        let attackCoeff = exp(-frameDuration / attackSeconds)
+        let releaseCoeff = exp(-frameDuration / releaseSeconds)
         if targetEcho > echoMix {
-            echoMix = echoMix * (1 - gateAttack) + targetEcho * gateAttack
+            echoMix = echoMix * Float(attackCoeff) + targetEcho * Float(1 - attackCoeff)
         } else {
-            echoMix = echoMix * gateRelease + targetEcho * (1 - gateRelease)
+            echoMix = echoMix * Float(releaseCoeff) + targetEcho * Float(1 - releaseCoeff)
         }
 
         let duckingDelayValue = max(0, duckingDelay)
@@ -1257,21 +1308,26 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let duckingTarget = bypassDucking ? 1.0 : (1.0 - min(duckingStrengthValue, curvedLevel * duckingLevelScaleValue))
         duckingLevel = duckingLevel * (1 - duckingResponseValue) + duckingTarget * duckingResponseValue
 
-        let duckedMix = echoMix * duckingLevel
-
         let outputLevel = echoMasterOutput.clamped(to: 0.0...1.0)
         let outputRatio = echoOutputRatio.clamped(to: 0.0...1.0)
-        let inputScale = (1 - outputRatio) + outputRatio * curvedLevel
-        gateMixer?.outputVolume = duckedMix * outputLevel * inputScale
+        let inputScale = (1 - outputRatio) + outputRatio * lastTriggerLevel
+        var outputGain = outputLevel * inputScale
         delayNode?.delayTime = echoDelayTime.clamped(to: 0.0...2.0)
         delayNode?.feedback = echoFeedback.clamped(to: -100.0...100.0)
         delayNode?.lowPassCutoff = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
         let wetBase = echoWetMixBase.clamped(to: 0.0...100.0)
         let wetRange = echoWetMixRange.clamped(to: 0.0...100.0)
         let wetMixValue = wetBase + wetRange * echoMix
-        let wetMix = echoWetOnly ? 100 : min(100, max(0, wetMixValue))
-        delayNode?.wetDryMix = wetMix
+        if echoWetOnly {
+            delayNode?.wetDryMix = 100
+            let wetGain = min(100, max(0, wetMixValue)) / 100
+            outputGain *= wetGain
+        } else {
+            let wetMix = min(100, max(0, wetMixValue))
+            delayNode?.wetDryMix = wetMix
+        }
         boostNode?.globalGain = echoBoostDb.clamped(to: -96.0...24.0)
+        gateMixer?.outputVolume = isInjecting ? outputGain * duckingLevel : 0
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -1289,6 +1345,97 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
 
         lastCurvedLevel = curvedLevel
+    }
+
+    private func configurePreRoll(sampleRate: Double) {
+        let capacity = max(1, Int(sampleRate * preRollDuration))
+        preRollBuffer = Array(repeating: 0, count: capacity)
+        preRollIndex = 0
+        preRollFilled = false
+    }
+
+    private func appendPreRollSample(_ sample: Float) {
+        guard !preRollBuffer.isEmpty else { return }
+        preRollBuffer[preRollIndex] = sample
+        preRollIndex = (preRollIndex + 1) % preRollBuffer.count
+        if preRollIndex == 0 {
+            preRollFilled = true
+        }
+    }
+
+    private func snapshotPreRoll() -> [Float] {
+        guard !preRollBuffer.isEmpty else { return [] }
+        if !preRollFilled {
+            return Array(preRollBuffer.prefix(preRollIndex))
+        }
+
+        let head = preRollBuffer[preRollIndex..<preRollBuffer.count]
+        let tail = preRollBuffer[0..<preRollIndex]
+        return Array(head) + Array(tail)
+    }
+
+    private func beginCapture(preRoll: [Float], holdDuration: Double, sampleRate: Double) {
+        isCapturing = true
+        captureSamples = preRoll
+        let holdSamples = max(0, Int(sampleRate * holdDuration))
+        captureTargetSamples = captureSamples.count + holdSamples
+
+        if captureTargetSamples == 0 || captureSamples.count >= captureTargetSamples {
+            finalizeCapture(sampleRate: sampleRate)
+        }
+    }
+
+    private func finalizeCapture(sampleRate: Double) {
+        isCapturing = false
+        let targetCount = max(0, captureTargetSamples)
+        if targetCount > 0, captureSamples.count > targetCount {
+            captureSamples = Array(captureSamples.prefix(targetCount))
+        }
+        guard !captureSamples.isEmpty else {
+            captureSamples.removeAll()
+            captureTargetSamples = 0
+            return
+        }
+
+        scheduleSnippetPlayback(samples: captureSamples, sampleRate: sampleRate)
+        captureSamples.removeAll()
+        captureTargetSamples = 0
+    }
+
+    private func scheduleSnippetPlayback(samples: [Float], sampleRate: Double) {
+        guard ensurePlaybackEngine(sampleRate: sampleRate),
+              let playbackFormat = playbackFormat,
+              let playerNode = playerNode else {
+            return
+        }
+
+        let frameCount = AVAudioFrameCount(samples.count)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: playbackFormat, frameCapacity: frameCount),
+              let data = buffer.floatChannelData?.pointee else {
+            return
+        }
+
+        buffer.frameLength = frameCount
+        samples.withUnsafeBufferPointer { pointer in
+            if let base = pointer.baseAddress {
+                data.assign(from: base, count: samples.count)
+            }
+        }
+
+        isInjecting = true
+        playerNode.stop()
+        playerNode.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+            self?.captureQueue.async { [weak self] in
+                self?.isInjecting = false
+            }
+        }
+        playerNode.play()
+    }
+
+    private func highPassCoefficient(sampleRate: Double, cutoff: Double) -> Float {
+        let dt = 1.0 / sampleRate
+        let rc = 1.0 / (2.0 * Double.pi * cutoff)
+        return Float(rc / (rc + dt))
     }
 
     private func resolveDirectionPoint(sumXW: Float,
@@ -1317,20 +1464,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         return clamped
     }
 
-    private func enqueuePlayback(_ buffer: AVAudioPCMBuffer) {
-        guard let playerNode = playerNode else { return }
-        if pendingBuffers >= maxPendingBuffers {
-            return
-        }
-
-        pendingBuffers += 1
-        playerNode.scheduleBuffer(buffer) { [weak self] in
-            self?.captureQueue.async { [weak self] in
-                guard let self = self else { return }
-                self.pendingBuffers = max(0, self.pendingBuffers - 1)
-            }
-        }
-    }
 }
 
 extension AuroraAudioProcessor: AVCaptureAudioDataOutputSampleBufferDelegate {

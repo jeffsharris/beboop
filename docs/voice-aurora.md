@@ -1,7 +1,8 @@
-# Voice Aurora notes
+# Spatial Voice notes
 
 This document captures the design goals and the current audio/spatial implementation
-for Voice Aurora so future changes stay aligned with the experience.
+for Spatial Voice (FOA) and Aurora Voice (classic) so future changes stay aligned
+with the experience.
 
 ## Design goals
 
@@ -15,7 +16,7 @@ for Voice Aurora so future changes stay aligned with the experience.
 - Spatial direction is more important than perfect accuracy. The goal is to convey
   left vs right and top vs bottom in a pleasing, stable way.
 
-## Visual implementation (VoiceAuroraView)
+## Visual implementation (Spatial Voice)
 
 - `AuroraAudioProcessor.sourcePoint` is used to pick the nearest edge and edge position
   for each wave.
@@ -27,7 +28,7 @@ for Voice Aurora so future changes stay aligned with the experience.
   - `phase` for organic wobble
 - The wave band is drawn as a noisy ring segment and then composited with multiple
   gradient stops to keep overlaps luminous (screen blend + blur for glow).
-- A live "Echo Tuning" panel is available in the Voice Aurora UI (slider icon at
+- A live "Echo Tuning" panel is available in the Spatial Voice UI (slider icon at
   bottom-left). Use it to adjust echo parameters on-device while listening. Settings
   persist across launches.
 - The panel includes Master Output (to hard-mute the echo) and a Wet Only toggle
@@ -40,22 +41,27 @@ for Voice Aurora so future changes stay aligned with the experience.
 - "Input Floor" sets the minimum normalized level required before the echo gate
   reacts, so taps and desk noise are ignored.
 
-## Echo audio chain (AuroraAudioProcessor)
+## Echo audio chain (Spatial Voice / AuroraAudioProcessor)
 
 - Spatial capture runs through `AVCaptureSession` and an `AVCaptureAudioDataOutput`.
-- Playback is a separate `AVAudioEngine` chain fed with the FOA W channel:
+- Playback is a separate `AVAudioEngine` chain fed by captured snippets:
   `playerNode -> gateMixer -> delay -> boost -> mainMixer`
-- Loud-first, controlled-fade strategy:
-- The echo gate only triggers on rising input energy and enforces a retrigger
-  cooldown (`echoTriggerRise`, `echoRetriggerInterval`) to prevent feedback
-  from re-arming the echo.
-- Keep `echoRetriggerInterval` longer than `echoDelayTime` to avoid the speaker
-  echo re-triggering itself.
-- The gate holds open for `echoHoldDuration` so a full word gets into the delay
-  buffer before the gate closes.
+- There is no continuous mic monitor path. Instead:
+  - Detect a voice onset from band-limited RMS.
+  - Capture a short snippet (with pre-roll).
+  - Stop feeding mic into the echo chain.
+  - Play the snippet once into the delay and let the tail decay.
+  - Ignore retriggers until `echoRetriggerInterval` has elapsed.
+- `echoHoldDuration` is the capture window for the snippet (not a continuous gate).
+- `echoRetriggerInterval` is the lockout window that keeps the speaker bleed from
+  re-triggering the echo.
+- `echoGateAttack` and `echoGateRelease` are time constants (seconds) used to
+  smooth the echo on/off envelope while the tail decays.
 - `AVAudioUnitDelay` provides repeat spacing (`echoDelayTime`) and decay (`echoFeedback`).
 - `echoBoostDb` keeps the first echo strong.
-- Wet mix stays high (85–100) so delayed tails can finish even after the gate closes.
+- Wet mix stays high (85–100) so delayed tails can finish even after the capture
+  window closes. When Wet Only is on, Wet Base/Range act as output gain shaping
+  rather than wet/dry mix.
 - Ducking (`duckingStrength`, `duckingLevelScale`, `duckingResponse`) reduces echo
   when live speech is hot. `duckingDelay` preserves the initial hit before ducking
   engages.
@@ -68,7 +74,7 @@ Tuning notes:
 - If the echo never gates off, raise `echoInputFloor` or `echoGateThreshold`, or
   set Master Output to 0 to confirm the output is muted.
 
-## Spatial audio capture and direction
+## Spatial audio capture and direction (Spatial Voice)
 
 - FOA capture is iOS 26+ only.
 - The capture pipeline must use:
@@ -97,10 +103,12 @@ Tuning notes:
 - After the capture session starts, apply only minimal playback overrides (speaker
   output, preferred input channel count). Avoid forcing voice processing or custom
   audio session modes that can collapse FOA.
+- The gate level uses a simple high-pass filter (~180 Hz) before RMS, which makes
+  desk taps less likely to trigger the echo.
 
-## Classic mode (VoiceAuroraClassicView)
+## Classic mode (Aurora Voice / VoiceAuroraClassicView)
 
-- "Aurora Classic" uses the original voice chat pipeline (`AVAudioEngine` input tap
+- "Aurora Voice" uses the original voice chat pipeline (`AVAudioEngine` input tap
   + `AVAudioSession` `.voiceChat`) to keep Apple’s echo cancellation and AGC active.
 - Waves always emanate from the bottom center, so there is no spatial direction
   logic in this mode.

@@ -16,9 +16,9 @@ struct ModeSwitcherView: View {
             case .driftDoodles:
                 return "Drift Doodles"
             case .voiceAurora:
-                return "Voice Aurora"
+                return "Spatial Voice"
             case .voiceAuroraClassic:
-                return "Aurora Classic"
+                return "Aurora Voice"
             }
         }
 
