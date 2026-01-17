@@ -863,15 +863,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private func applyPlaybackOverrides() {
         let session = AVAudioSession.sharedInstance()
         do {
+            try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
             try session.setPreferredInputNumberOfChannels(4)
-        } catch {
-            print("Failed to set preferred input channels: \(error)")
-        }
-
-        do {
+            try session.setActive(true)
             try session.overrideOutputAudioPort(.speaker)
         } catch {
-            print("Failed to override audio output: \(error)")
+            print("Failed to configure audio session: \(error)")
         }
     }
 
