@@ -336,7 +336,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     private func configureAudioSession(_ session: AVAudioSession) throws {
-        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetooth])
+        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers, .allowBluetoothHFP])
         try session.setMode(.voiceChat)
         try session.setActive(true)
 

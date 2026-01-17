@@ -608,7 +608,11 @@ struct HighContrastMobileView: View {
     private func currentInterfaceOrientation() -> UIInterfaceOrientation {
         for scene in UIApplication.shared.connectedScenes {
             if let windowScene = scene as? UIWindowScene {
-                return windowScene.interfaceOrientation
+                if #available(iOS 26.0, *) {
+                    return windowScene.effectiveGeometry.interfaceOrientation
+                } else {
+                    return windowScene.interfaceOrientation
+                }
             }
         }
         return .portrait

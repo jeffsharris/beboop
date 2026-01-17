@@ -1034,7 +1034,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         buffer.frameLength = frameCount
         samples.withUnsafeBufferPointer { pointer in
             if let base = pointer.baseAddress {
-                data.assign(from: base, count: samples.count)
+                data.update(from: base, count: samples.count)
             }
         }
 
@@ -1308,3 +1308,4 @@ private extension Float {
     VoiceAuroraView()
         .environmentObject(AudioCoordinator())
 }
+
