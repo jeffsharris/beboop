@@ -42,6 +42,7 @@ struct ModeSwitcherView: View {
     var body: some View {
         ZStack {
             modeView
+                .id(activeMode.rawValue)
 
             menuButton
 

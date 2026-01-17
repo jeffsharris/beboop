@@ -1057,7 +1057,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             sessionCapture.addOutput(output)
 
             sessionCapture.commitConfiguration()
-            sessionCapture.startRunning()
 
             captureSession = sessionCapture
             captureInput = input
@@ -1065,6 +1064,10 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             isListening = true
 
             applyPlaybackOverrides()
+
+            captureQueue.async {
+                sessionCapture.startRunning()
+            }
         } catch {
             print("Aurora audio setup failed: \(error)")
         }
