@@ -29,6 +29,7 @@ struct VoiceAuroraView: View {
     @State private var lastUpdateTime: Date = Date()
     @State private var lastWaveTime: Date = .distantPast
     @AppStorage("echoLab.presented") private var isEchoLabPresented = false
+    @State private var isMicMuted = false
 
     private let waveCooldown: TimeInterval = 0.16
     private let waveMinLevel: Double = 0.08
@@ -58,13 +59,34 @@ struct VoiceAuroraView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         )
+        .overlay(
+            Group {
+                if isMicMuted {
+                    GeometryReader { proxy in
+                        let minDim = min(proxy.size.width, proxy.size.height)
+                        let lineWidth: CGFloat = 5
+                        let cornerRadius = max(24, minDim * 0.14)
+                        let borderColor = Color(red: 0.35, green: 0.75, blue: 0.8)
+
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(borderColor.opacity(0.9), lineWidth: lineWidth)
+                            .shadow(color: borderColor.opacity(0.35), radius: 10)
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .ignoresSafeArea()
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+        )
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in
                     audioProcessor.setMicMuted(true)
+                    isMicMuted = true
                 }
                 .onEnded { _ in
                     audioProcessor.setMicMuted(false)
+                    isMicMuted = false
                 }
         )
         .sheet(isPresented: $isEchoLabPresented) {
@@ -84,6 +106,7 @@ struct VoiceAuroraView: View {
         }
         .onDisappear {
             audioProcessor.setMicMuted(false)
+            isMicMuted = false
             audioCoordinator.unregister(mode: .voiceAurora)
         }
     }
