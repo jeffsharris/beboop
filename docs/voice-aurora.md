@@ -31,6 +31,8 @@ for Voice Aurora so future changes stay aligned with the experience.
   bottom-left). Use it to adjust echo parameters on-device while listening.
 - The panel includes Master Output (to hard-mute the echo) and a Wet Only toggle
   (to remove dry monitoring from the delay unit).
+- "Input Floor" sets the minimum normalized level required before the echo gate
+  reacts, so taps and desk noise are ignored.
 
 ## Echo audio chain (AuroraAudioProcessor)
 

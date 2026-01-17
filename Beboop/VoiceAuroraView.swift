@@ -347,6 +347,11 @@ struct VoiceAuroraView: View {
                             .foregroundColor(.primary)
 
                         sliderSectionHeader("Gate")
+                        sliderRow(title: "Input Floor",
+                                  value: floatBinding(\.echoInputFloor),
+                                  range: 0.0...0.8,
+                                  step: 0.01,
+                                  format: "%.2f")
                         sliderRow(title: "Gate Threshold",
                                   value: floatBinding(\.echoGateThreshold),
                                   range: 0.02...1.2,
@@ -526,6 +531,7 @@ struct VoiceAuroraView: View {
 
 final class AuroraAudioProcessor: NSObject, ObservableObject {
     private enum EchoDefaults {
+        static let inputFloor: Float = 0.08
         static let gateThreshold: Float = 0.1
         static let gateAttack: Float = 0.75
         static let gateRelease: Float = 0.8
@@ -549,6 +555,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     @Published var smoothedLevel: Float = 0
     @Published var dominantPitch: Float = 0.5
     @Published var sourcePoint: CGPoint = CGPoint(x: 0.5, y: 0.9)
+    @Published var echoInputFloor: Float = EchoDefaults.inputFloor
     @Published var echoGateThreshold: Float = EchoDefaults.gateThreshold
     @Published var echoGateAttack: Float = EchoDefaults.gateAttack
     @Published var echoGateRelease: Float = EchoDefaults.gateRelease
@@ -596,6 +603,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var lastEchoTriggerTime: Double = 0
 
     func resetEchoDefaults() {
+        echoInputFloor = EchoDefaults.inputFloor
         echoGateThreshold = EchoDefaults.gateThreshold
         echoGateAttack = EchoDefaults.gateAttack
         echoGateRelease = EchoDefaults.gateRelease
@@ -814,7 +822,9 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
         let rms = sqrt(sumW2 / Float(frames))
         let normalizedLevel = min(1.0, rms * 8.0)
-        let curvedLevel = pow(normalizedLevel, 0.7)
+        let inputFloor = max(0, echoInputFloor)
+        let effectiveLevel: Float = normalizedLevel < inputFloor ? 0 : normalizedLevel
+        let curvedLevel = pow(effectiveLevel, 0.7)
 
         let estimatedFreq = (Double(zeroCrossings) / 2.0) * sampleRate / Double(frames)
         let logFreq = log2(estimatedFreq / 100.0) / 3.3
@@ -824,7 +834,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                                    sumYW: sumYW,
                                                    sumZW: sumZW,
                                                    energy: sumW2,
-                                                   level: normalizedLevel)
+                                                   level: effectiveLevel)
 
         let now = CFAbsoluteTimeGetCurrent()
         let levelRise = curvedLevel - lastCurvedLevel
