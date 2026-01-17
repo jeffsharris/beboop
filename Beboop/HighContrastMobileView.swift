@@ -32,6 +32,8 @@ struct HighContrastMobileView: View {
     @State private var dragVelocity: CGPoint = .zero
     @State private var freezeTouchActive = false
     @State private var isFrozen = false
+    @State private var resizingShapeIndex: Int? = nil
+    @State private var resizeStartScale: CGFloat = 1.0
 
     // Animation state
     @State private var shapes: [ShapeState] = []
@@ -103,6 +105,32 @@ struct HighContrastMobileView: View {
                 }
                 .gesture(combinedGesture)
             }
+            .overlay(
+                FrozenResizeOverlay(
+                    isFrozen: { isFrozen },
+                    hitTestShape: { location in
+                        hitTest(at: location)
+                    },
+                    onResizeBegan: { index, _ in
+                        resizingShapeIndex = index
+                        resizeStartScale = shapes[index].sizeScale
+                        draggedShapeIndex = nil
+                        dragVelocity = .zero
+                    },
+                    onResizeChanged: { translation in
+                        guard isFrozen, let index = resizingShapeIndex else { return }
+                        let sizeDelta = -translation.y / 180.0
+                        var shape = shapes[index]
+                        shape.sizeScale = (resizeStartScale + sizeDelta).clamped(to: minShapeScale...maxShapeScale)
+                        shape.position = clampedPosition(for: shape, proposed: shape.position, in: screenSize)
+                        shapes[index] = shape
+                    },
+                    onResizeEnded: {
+                        resizingShapeIndex = nil
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            )
         }
     }
 
@@ -165,6 +193,7 @@ struct HighContrastMobileView: View {
         if freezeTouchActive {
             freezeTouchActive = false
             isFrozen = false
+            resizingShapeIndex = nil
             draggedShapeIndex = nil
             dragVelocity = .zero
             return
@@ -815,6 +844,98 @@ struct HighContrastMobileView: View {
 private extension CGFloat {
     func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
         Swift.min(range.upperBound, Swift.max(range.lowerBound, self))
+    }
+}
+
+private struct FrozenResizeOverlay: UIViewRepresentable {
+    var isFrozen: () -> Bool
+    var hitTestShape: (CGPoint) -> Int?
+    var onResizeBegan: (Int, CGPoint) -> Void
+    var onResizeChanged: (CGPoint) -> Void
+    var onResizeEnded: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> FrozenResizeView {
+        let view = FrozenResizeView()
+        view.backgroundColor = .clear
+        view.shouldReceiveTouch = { [weak context] point in
+            guard let context else { return false }
+            return context.coordinator.shouldHandle(point: point)
+        }
+
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator,
+                                                action: #selector(Coordinator.handlePan(_:)))
+        panGesture.minimumNumberOfTouches = 1
+        panGesture.maximumNumberOfTouches = 1
+        panGesture.cancelsTouchesInView = false
+        panGesture.delegate = context.coordinator
+        view.addGestureRecognizer(panGesture)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: FrozenResizeView, context: Context) {
+        uiView.shouldReceiveTouch = { [weak context] point in
+            guard let context else { return false }
+            return context.coordinator.shouldHandle(point: point)
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let parent: FrozenResizeOverlay
+        private var activeIndex: Int?
+
+        init(_ parent: FrozenResizeOverlay) {
+            self.parent = parent
+        }
+
+        func shouldHandle(point: CGPoint) -> Bool {
+            guard parent.isFrozen() else { return false }
+            return parent.hitTestShape(point) != nil
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            let location = recognizer.location(in: view)
+
+            switch recognizer.state {
+            case .began:
+                guard parent.isFrozen(), let index = parent.hitTestShape(location) else { return }
+                activeIndex = index
+                parent.onResizeBegan(index, location)
+            case .changed:
+                guard activeIndex != nil else { return }
+                let translation = recognizer.translation(in: view)
+                parent.onResizeChanged(CGPoint(x: translation.x, y: translation.y))
+            case .ended, .cancelled, .failed:
+                if activeIndex != nil {
+                    parent.onResizeEnded()
+                }
+                activeIndex = nil
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let view = gestureRecognizer.view else { return false }
+            let location = gestureRecognizer.location(in: view)
+            return shouldHandle(point: location)
+        }
+    }
+}
+
+private final class FrozenResizeView: UIView {
+    var shouldReceiveTouch: ((CGPoint) -> Bool)?
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard shouldReceiveTouch?(point) == true else {
+            return nil
+        }
+        return super.hitTest(point, with: event)
     }
 }
 
