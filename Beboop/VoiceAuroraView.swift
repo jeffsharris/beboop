@@ -27,6 +27,7 @@ struct VoiceAuroraView: View {
     @State private var waves: [Wave] = []
     @State private var lastUpdateTime: Date = Date()
     @State private var lastWaveTime: Date = .distantPast
+    @AppStorage("echoLab.presented") private var isEchoLabPresented = false
 
     private let waveCooldown: TimeInterval = 0.16
     private let waveMinLevel: Double = 0.08
@@ -50,6 +51,14 @@ struct VoiceAuroraView: View {
             }
             .ignoresSafeArea()
         }
+#if DEBUG
+        .sheet(isPresented: $isEchoLabPresented) {
+            EchoLabView(audioProcessor: audioProcessor,
+                        isPresented: $isEchoLabPresented)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+#endif
         .onAppear {
             audioCoordinator.register(mode: .voiceAurora,
                                       start: {
@@ -309,10 +318,32 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         static let triggerRise: Float = 0.2
         static let retriggerInterval: Double = 0.55
         static let holdDuration: Double = 0.24
+        static let snrMarginDB: Float = 9.0
+        static let hardDeafen: Double = 0.22
+        static let bleedTauUp: Double = 0.35
+        static let bleedTauDown: Double = 0.75
+        static let bleedStepCap: Float = 6.0
+        static let threshMul: Float = 1.6
+        static let threshBias: Float = 0.05
+        static let riseMinWhenEchoActive: Float = 0.22
     }
 
-    private static let settingsVersion = 3
+    private enum EchoLabDefaults {
+        static let phraseX: Float = 0.45
+        static let shieldY: Float = 0.62
+        static let spaceX: Float = 0.55
+        static let decayY: Float = 0.55
+        static let level: Float = 0.55
+        static let softLockoutEnabled: Bool = true
+        static let outputMaskEnabled: Bool = true
+        static let freezeEventGainEnabled: Bool = true
+        static let limiterEnabled: Bool = false
+    }
+
+    private static let settingsVersion = 4
     private static let settingsVersionKey = "voiceAurora.echo.settingsVersion"
+    private static let labSchemaVersion = 1
+    private static let labSchemaVersionKey = "voiceAurora.echo.labSchemaVersion"
 
     private enum EchoSettingKey: String {
         case inputGain = "voiceAurora.echo.inputGain"
@@ -337,6 +368,37 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         case triggerRise = "voiceAurora.echo.triggerRise"
         case retriggerInterval = "voiceAurora.echo.retriggerInterval"
         case holdDuration = "voiceAurora.echo.holdDuration"
+        case snrMarginDB = "voiceAurora.echo.snrMarginDB"
+        case hardDeafen = "voiceAurora.echo.hardDeafen"
+        case bleedTauUp = "voiceAurora.echo.bleedTauUp"
+        case bleedTauDown = "voiceAurora.echo.bleedTauDown"
+        case bleedStepCap = "voiceAurora.echo.bleedStepCap"
+        case threshMul = "voiceAurora.echo.threshMul"
+        case threshBias = "voiceAurora.echo.threshBias"
+        case riseMinWhenEchoActive = "voiceAurora.echo.riseMinWhenEchoActive"
+    }
+
+    private enum EchoLabKey: String {
+        case phraseX = "voiceAurora.echo.lab.phraseX"
+        case shieldY = "voiceAurora.echo.lab.shieldY"
+        case spaceX = "voiceAurora.echo.lab.spaceX"
+        case decayY = "voiceAurora.echo.lab.decayY"
+        case level = "voiceAurora.echo.lab.level"
+        case activeSlot = "voiceAurora.echo.lab.activeSlot"
+        case slotAPhraseX = "voiceAurora.echo.lab.slotA.phraseX"
+        case slotAShieldY = "voiceAurora.echo.lab.slotA.shieldY"
+        case slotASpaceX = "voiceAurora.echo.lab.slotA.spaceX"
+        case slotADecayY = "voiceAurora.echo.lab.slotA.decayY"
+        case slotALevel = "voiceAurora.echo.lab.slotA.level"
+        case slotBPhraseX = "voiceAurora.echo.lab.slotB.phraseX"
+        case slotBShieldY = "voiceAurora.echo.lab.slotB.shieldY"
+        case slotBSpaceX = "voiceAurora.echo.lab.slotB.spaceX"
+        case slotBDecayY = "voiceAurora.echo.lab.slotB.decayY"
+        case slotBLevel = "voiceAurora.echo.lab.slotB.level"
+        case softLockoutEnabled = "voiceAurora.echo.lab.softLockoutEnabled"
+        case outputMaskEnabled = "voiceAurora.echo.lab.outputMaskEnabled"
+        case freezeEventGainEnabled = "voiceAurora.echo.lab.freezeEventGainEnabled"
+        case limiterEnabled = "voiceAurora.echo.lab.limiterEnabled"
     }
 
     @Published var smoothedLevel: Float = 0
@@ -408,8 +470,58 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     @Published var echoHoldDuration: Double = EchoDefaults.holdDuration {
         didSet { persistSetting(.holdDuration, value: echoHoldDuration) }
     }
+    @Published private(set) var labPhraseX: Float = EchoLabDefaults.phraseX
+    @Published private(set) var labShieldY: Float = EchoLabDefaults.shieldY
+    @Published private(set) var labSpaceX: Float = EchoLabDefaults.spaceX
+    @Published private(set) var labDecayY: Float = EchoLabDefaults.decayY
+    @Published private(set) var labEchoLevel: Float = EchoLabDefaults.level
+    @Published private(set) var labActiveSlot: EchoLabSlot = .a
+    @Published var labSoftLockoutEnabled: Bool = EchoLabDefaults.softLockoutEnabled {
+        didSet { persistLabSetting(.softLockoutEnabled, value: labSoftLockoutEnabled) }
+    }
+    @Published var labOutputMaskEnabled: Bool = EchoLabDefaults.outputMaskEnabled {
+        didSet { persistLabSetting(.outputMaskEnabled, value: labOutputMaskEnabled) }
+    }
+    @Published var labFreezeEventGainEnabled: Bool = EchoLabDefaults.freezeEventGainEnabled {
+        didSet { persistLabSetting(.freezeEventGainEnabled, value: labFreezeEventGainEnabled) }
+    }
+    @Published var labLimiterEnabled: Bool = EchoLabDefaults.limiterEnabled {
+        didSet { persistLabSetting(.limiterEnabled, value: labLimiterEnabled) }
+    }
+    @Published var echoSnrMarginDB: Float = EchoDefaults.snrMarginDB {
+        didSet { persistSetting(.snrMarginDB, value: echoSnrMarginDB) }
+    }
+    @Published var echoHardDeafen: Double = EchoDefaults.hardDeafen {
+        didSet { persistSetting(.hardDeafen, value: echoHardDeafen) }
+    }
+    @Published var bleedTauUp: Double = EchoDefaults.bleedTauUp {
+        didSet { persistSetting(.bleedTauUp, value: bleedTauUp) }
+    }
+    @Published var bleedTauDown: Double = EchoDefaults.bleedTauDown {
+        didSet { persistSetting(.bleedTauDown, value: bleedTauDown) }
+    }
+    @Published var bleedStepCap: Float = EchoDefaults.bleedStepCap {
+        didSet { persistSetting(.bleedStepCap, value: bleedStepCap) }
+    }
+    @Published var echoThreshMul: Float = EchoDefaults.threshMul {
+        didSet { persistSetting(.threshMul, value: echoThreshMul) }
+    }
+    @Published var echoThreshBias: Float = EchoDefaults.threshBias {
+        didSet { persistSetting(.threshBias, value: echoThreshBias) }
+    }
+    @Published var riseMinWhenEchoActive: Float = EchoDefaults.riseMinWhenEchoActive {
+        didSet { persistSetting(.riseMinWhenEchoActive, value: riseMinWhenEchoActive) }
+    }
+    @Published var echoMaxCaptureDuration: Double = 0.6
+    @Published var echoEndHangover: Double = 0.2
+    @Published var echoPreRollDuration: Double = 0.05
+    @Published var debugSnapshot = EchoLabDebugSnapshot()
 
     private var isRestoringSettings = false
+    private var isRestoringLabSettings = false
+    private var isApplyingMacroMapping = false
+    private var labSlotA = EchoLabMacroValues.defaultSlot
+    private var labSlotB = EchoLabMacroValues.defaultSlot
 
     private let captureQueue = DispatchQueue(label: "VoiceAurora.Capture")
     private let foaLayoutTag: AudioChannelLayoutTag = AudioChannelLayoutTag(kAudioChannelLayoutTag_HOA_ACN_SN3D | 4)
@@ -423,6 +535,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var gateMixer: AVAudioMixerNode?
     private var delayNode: AVAudioUnitDelay?
     private var boostNode: AVAudioUnitEQ?
+    private var smoothedDelayTime: Double = 0
+    private var smoothedFeedback: Float = 0
+    private var smoothedLowPass: Float = 0
+    private var smoothedOutputGain: Float = 0
+    private var smoothedWetMix: Float = 0
     private var playbackFormat: AVAudioFormat?
     private var isListening = false
     private var levelHistory: [Float] = []
@@ -431,22 +548,32 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var eventActiveUntil: Double = 0
     private var eventWetGain: Float = 0
     private var eventWetMix: Float = 0
+    private var eventMasterOutput: Float = 0
+    private var eventOutputRatio: Float = 0
+    private var eventMixAtTrigger: Float = 0
     private var pendingEventMix: Float = 0
     private var lastDirectionPoint = CGPoint(x: 0.5, y: 0.85)
     private var captureSamples: [Float] = []
     private var captureTargetSamples = 0
+    private var captureMinSamples = 0
+    private var captureHangoverSamples = 0
+    private var captureSilenceSamples = 0
+    private var capturePreRollCount = 0
+    private var captureStartTime: Double = 0
     private var isCapturing = false
     private var preRollBuffer: [Float] = []
     private var preRollIndex = 0
     private var preRollFilled = false
-    private let preRollDuration: Double = 0.05
+    private let minCaptureDuration: Double = 0.18
+    private var lastConfiguredPreRollDuration: Double = 0
     private var cooldownUntil: Double = 0
+    private var deafenUntil: Double = 0
     private var lastSampleRate: Double = 0
     private var isInjecting = false
     private var lastTriggerLevel: Float = 0
     private var highPassLastInput: Float = 0
     private var highPassLastOutput: Float = 0
-    private let gateHighPassCutoff: Float = 180
+    private var gateHighPassCutoff: Float = 180
 
     private let directionConfidenceThreshold: Float = 0.06
     private let sourceSmoothing: CGFloat = 0.15
@@ -456,16 +583,25 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     private var pendingStartWorkItem: DispatchWorkItem?
     private var lastMicDB: Float = -160
     private var bleedDeltaDB: Float = -18
-    private let bleedAlpha: Float = 0.03
-    private let snrMarginDB: Float = 9.0
     private let bleedRiseGuardDB: Float = 1.5
     private let outDBFloor: Float = -160
     private let outDBMeter = AtomicFloat(initialValue: -160)
     private var isWetTapInstalled = false
+    private var wetMeterNode: AVAudioNode?
+    private var lastDebugPublishTime: Double = 0
+    private var lastEventReason: String = "Idle"
+    private var lastBlockReason: String = "Idle"
+    private var currentDynamicThreshold: Float = 0
+    private var currentEndThreshold: Float = 0
+    private var calibrationMode: EchoLabCalibrationMode = .none
+    private var calibrationSamples: [Float] = []
+    private var calibrationStartTime: Double = 0
+    private var calibrationEndTime: Double = 0
 
     override init() {
         super.init()
         restoreSettings()
+        restoreLabSettings()
     }
 
     func resetEchoDefaults() {
@@ -491,13 +627,26 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         echoTriggerRise = EchoDefaults.triggerRise
         echoRetriggerInterval = EchoDefaults.retriggerInterval
         echoHoldDuration = EchoDefaults.holdDuration
+        echoSnrMarginDB = EchoDefaults.snrMarginDB
+        echoHardDeafen = EchoDefaults.hardDeafen
+        bleedTauUp = EchoDefaults.bleedTauUp
+        bleedTauDown = EchoDefaults.bleedTauDown
+        bleedStepCap = EchoDefaults.bleedStepCap
+        echoThreshMul = EchoDefaults.threshMul
+        echoThreshBias = EchoDefaults.threshBias
+        riseMinWhenEchoActive = EchoDefaults.riseMinWhenEchoActive
+        resetLabDefaults()
     }
 
     private func resetEventState() {
         cooldownUntil = 0
+        deafenUntil = 0
         eventActiveUntil = 0
         eventWetGain = 0
         eventWetMix = 0
+        eventMasterOutput = 0
+        eventOutputRatio = 0
+        eventMixAtTrigger = 0
         pendingEventMix = 0
         echoMix = 0
         lastTriggerLevel = 0
@@ -506,6 +655,15 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         lastMicDB = outDBFloor
         bleedDeltaDB = -18
         outDBMeter.set(outDBFloor)
+        lastEventReason = "Idle"
+        lastBlockReason = "Idle"
+        captureSilenceSamples = 0
+        captureMinSamples = 0
+        captureHangoverSamples = 0
+        capturePreRollCount = 0
+        captureStartTime = 0
+        currentDynamicThreshold = 0
+        currentEndThreshold = 0
     }
 
     private func restoreSettings() {
@@ -539,8 +697,221 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         echoTriggerRise = loadFloat(.triggerRise, fallback: EchoDefaults.triggerRise)
         echoRetriggerInterval = loadDouble(.retriggerInterval, fallback: EchoDefaults.retriggerInterval)
         echoHoldDuration = loadDouble(.holdDuration, fallback: EchoDefaults.holdDuration)
+        echoSnrMarginDB = loadFloat(.snrMarginDB, fallback: EchoDefaults.snrMarginDB)
+        echoHardDeafen = loadDouble(.hardDeafen, fallback: EchoDefaults.hardDeafen)
+        bleedTauUp = loadDouble(.bleedTauUp, fallback: EchoDefaults.bleedTauUp)
+        bleedTauDown = loadDouble(.bleedTauDown, fallback: EchoDefaults.bleedTauDown)
+        bleedStepCap = loadFloat(.bleedStepCap, fallback: EchoDefaults.bleedStepCap)
+        echoThreshMul = loadFloat(.threshMul, fallback: EchoDefaults.threshMul)
+        echoThreshBias = loadFloat(.threshBias, fallback: EchoDefaults.threshBias)
+        riseMinWhenEchoActive = loadFloat(.riseMinWhenEchoActive, fallback: EchoDefaults.riseMinWhenEchoActive)
         isRestoringSettings = false
     }
+
+    private func resetLabDefaults() {
+        labSoftLockoutEnabled = EchoLabDefaults.softLockoutEnabled
+        labOutputMaskEnabled = EchoLabDefaults.outputMaskEnabled
+        labFreezeEventGainEnabled = EchoLabDefaults.freezeEventGainEnabled
+        labLimiterEnabled = EchoLabDefaults.limiterEnabled
+        labActiveSlot = .a
+        UserDefaults.standard.set(labActiveSlot.rawValue, forKey: EchoLabKey.activeSlot.rawValue)
+        let defaults = EchoLabMacroValues.defaultSlot
+        labSlotA = defaults
+        labSlotB = defaults
+        updateMacroValues(phraseX: defaults.phraseX,
+                          shieldY: defaults.shieldY,
+                          spaceX: defaults.spaceX,
+                          decayY: defaults.decayY,
+                          level: defaults.level,
+                          persist: true)
+        persistLabSlot(.a, values: labSlotA)
+        persistLabSlot(.b, values: labSlotB)
+        UserDefaults.standard.set(Self.labSchemaVersion, forKey: Self.labSchemaVersionKey)
+    }
+
+    private func restoreLabSettings() {
+        isRestoringLabSettings = true
+        let storedVersion = UserDefaults.standard.integer(forKey: Self.labSchemaVersionKey)
+        if storedVersion != Self.labSchemaVersion {
+            isRestoringLabSettings = false
+            resetLabDefaults()
+            return
+        }
+
+        labSoftLockoutEnabled = loadLabBool(.softLockoutEnabled, fallback: EchoLabDefaults.softLockoutEnabled)
+        labOutputMaskEnabled = loadLabBool(.outputMaskEnabled, fallback: EchoLabDefaults.outputMaskEnabled)
+        labFreezeEventGainEnabled = loadLabBool(.freezeEventGainEnabled, fallback: EchoLabDefaults.freezeEventGainEnabled)
+        labLimiterEnabled = loadLabBool(.limiterEnabled, fallback: EchoLabDefaults.limiterEnabled)
+        labSlotA = loadLabSlot(.a)
+        labSlotB = loadLabSlot(.b)
+        let slotRaw = UserDefaults.standard.integer(forKey: EchoLabKey.activeSlot.rawValue)
+        labActiveSlot = EchoLabSlot(rawValue: slotRaw) ?? .a
+
+        let phraseX = loadLabFloat(.phraseX, fallback: EchoLabDefaults.phraseX)
+        let shieldY = loadLabFloat(.shieldY, fallback: EchoLabDefaults.shieldY)
+        let spaceX = loadLabFloat(.spaceX, fallback: EchoLabDefaults.spaceX)
+        let decayY = loadLabFloat(.decayY, fallback: EchoLabDefaults.decayY)
+        let level = loadLabFloat(.level, fallback: EchoLabDefaults.level)
+        isRestoringLabSettings = false
+        updateMacroValues(phraseX: phraseX,
+                          shieldY: shieldY,
+                          spaceX: spaceX,
+                          decayY: decayY,
+                          level: level,
+                          persist: false)
+    }
+
+    func resetLabToDefaults() {
+        resetLabDefaults()
+    }
+
+    func activateLabSlot(_ slot: EchoLabSlot) {
+        labActiveSlot = slot
+        UserDefaults.standard.set(slot.rawValue, forKey: EchoLabKey.activeSlot.rawValue)
+        let values = slot == .a ? labSlotA : labSlotB
+        updateMacroValues(phraseX: values.phraseX,
+                          shieldY: values.shieldY,
+                          spaceX: values.spaceX,
+                          decayY: values.decayY,
+                          level: values.level,
+                          persist: true)
+    }
+
+    func saveLabSlot(_ slot: EchoLabSlot) {
+        let values = EchoLabMacroValues(phraseX: labPhraseX,
+                                        shieldY: labShieldY,
+                                        spaceX: labSpaceX,
+                                        decayY: labDecayY,
+                                        level: labEchoLevel)
+        if slot == .a {
+            labSlotA = values
+        } else {
+            labSlotB = values
+        }
+        persistLabSlot(slot, values: values)
+    }
+
+    func updateLabPhraseX(_ value: Float) {
+        updateMacroValues(phraseX: value,
+                          shieldY: labShieldY,
+                          spaceX: labSpaceX,
+                          decayY: labDecayY,
+                          level: labEchoLevel,
+                          persist: true)
+    }
+
+    func updateLabShieldY(_ value: Float) {
+        updateMacroValues(phraseX: labPhraseX,
+                          shieldY: value,
+                          spaceX: labSpaceX,
+                          decayY: labDecayY,
+                          level: labEchoLevel,
+                          persist: true)
+    }
+
+    func updateLabSpaceX(_ value: Float) {
+        updateMacroValues(phraseX: labPhraseX,
+                          shieldY: labShieldY,
+                          spaceX: value,
+                          decayY: labDecayY,
+                          level: labEchoLevel,
+                          persist: true)
+    }
+
+    func updateLabDecayY(_ value: Float) {
+        updateMacroValues(phraseX: labPhraseX,
+                          shieldY: labShieldY,
+                          spaceX: labSpaceX,
+                          decayY: value,
+                          level: labEchoLevel,
+                          persist: true)
+    }
+
+    func updateLabEchoLevel(_ value: Float) {
+        updateMacroValues(phraseX: labPhraseX,
+                          shieldY: labShieldY,
+                          spaceX: labSpaceX,
+                          decayY: labDecayY,
+                          level: value,
+                          persist: true)
+    }
+
+    private func updateMacroValues(phraseX: Float,
+                                   shieldY: Float,
+                                   spaceX: Float,
+                                   decayY: Float,
+                                   level: Float,
+                                   persist: Bool) {
+        let values = EchoLabMacroValues(phraseX: phraseX,
+                                        shieldY: shieldY,
+                                        spaceX: spaceX,
+                                        decayY: decayY,
+                                        level: level)
+        isApplyingMacroMapping = true
+        labPhraseX = values.phraseX
+        labShieldY = values.shieldY
+        labSpaceX = values.spaceX
+        labDecayY = values.decayY
+        labEchoLevel = values.level
+        isApplyingMacroMapping = false
+        if persist {
+            persistLabMacroValues(values)
+        }
+        applyMacroMapping()
+    }
+
+    private func applyMacroMapping() {
+        guard !isApplyingMacroMapping else { return }
+        isApplyingMacroMapping = true
+
+        let phrase = Double(labPhraseX)
+        let shield = Double(labShieldY)
+        let space = Double(labSpaceX)
+        let decay = Double(labDecayY)
+        let level = Double(labEchoLevel)
+
+        echoPreRollDuration = lerp(0.05, 0.12, phrase)
+        echoMaxCaptureDuration = lerp(0.28, 1.10, phrase)
+        echoEndHangover = lerp(0.12, 0.45, phrase)
+        echoHoldDuration = echoMaxCaptureDuration
+
+        echoRetriggerInterval = lerp(0.35, 1.00, shield)
+        echoHardDeafen = lerp(0.16, 0.34, shield)
+        echoSnrMarginDB = Float(lerp(7.0, 14.0, shield))
+        echoThreshMul = Float(lerp(1.45, 1.95, shield))
+        echoThreshBias = Float(lerp(0.03, 0.08, shield))
+        riseMinWhenEchoActive = Float(lerp(0.18, 0.26, shield))
+        echoInputCurve = Float(lerp(1.30, 1.55, shield))
+        echoInputFloor = Float(lerp(0.12, 0.18, shield))
+        echoGateThreshold = Float(lerp(0.46, 0.60, shield))
+        echoGateAttack = Float(lerp(0.05, 0.08, 1 - shield))
+        echoGateRelease = Float(lerp(0.22, 0.35, shield))
+        gateHighPassCutoff = Float(lerp(180, 240, shield))
+
+        let delayTime = lerp(0.22, 0.45, space)
+        echoDelayTime = delayTime
+        let targetTail = lerp(1.1, 3.2, decay)
+        let repeats = max(0.01, targetTail / max(0.01, delayTime))
+        let feedbackCoeff = pow(0.01, 1 / repeats)
+        let feedbackPercent = (feedbackCoeff * 100).clamped(to: 25...62)
+        echoFeedback = Float(feedbackPercent)
+        echoLowPassCutoff = Float(lerp(7500, 4200, decay))
+        duckingStrength = Float(lerp(0.60, 0.82, decay))
+        duckingResponse = 0.06
+        duckingLevelScale = 1.5
+        duckingDelay = 0.02
+
+        echoMasterOutput = Float(lerp(0.40, 0.72, level))
+        echoWetMixBase = Float(lerp(4, 10, level))
+        echoWetMixRange = Float(lerp(52, 78, level))
+        echoOutputRatio = Float(lerp(0.92, 0.98, level))
+
+        isApplyingMacroMapping = false
+        if lastSampleRate > 0 {
+            configurePreRoll(sampleRate: lastSampleRate)
+        }
+    }
+
 
     private func persistSetting(_ key: EchoSettingKey, value: Float) {
         guard !isRestoringSettings else { return }
@@ -557,11 +928,60 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         UserDefaults.standard.set(value, forKey: key.rawValue)
     }
 
+    private func persistLabSetting(_ key: EchoLabKey, value: Float) {
+        guard !isRestoringLabSettings else { return }
+        UserDefaults.standard.set(NSNumber(value: value), forKey: key.rawValue)
+    }
+
+    private func persistLabSetting(_ key: EchoLabKey, value: Bool) {
+        guard !isRestoringLabSettings else { return }
+        UserDefaults.standard.set(value, forKey: key.rawValue)
+    }
+
+    private func persistLabMacroValues(_ values: EchoLabMacroValues) {
+        persistLabSetting(.phraseX, value: values.phraseX)
+        persistLabSetting(.shieldY, value: values.shieldY)
+        persistLabSetting(.spaceX, value: values.spaceX)
+        persistLabSetting(.decayY, value: values.decayY)
+        persistLabSetting(.level, value: values.level)
+    }
+
+    private func persistLabSlot(_ slot: EchoLabSlot, values: EchoLabMacroValues) {
+        switch slot {
+        case .a:
+            UserDefaults.standard.set(values.phraseX, forKey: EchoLabKey.slotAPhraseX.rawValue)
+            UserDefaults.standard.set(values.shieldY, forKey: EchoLabKey.slotAShieldY.rawValue)
+            UserDefaults.standard.set(values.spaceX, forKey: EchoLabKey.slotASpaceX.rawValue)
+            UserDefaults.standard.set(values.decayY, forKey: EchoLabKey.slotADecayY.rawValue)
+            UserDefaults.standard.set(values.level, forKey: EchoLabKey.slotALevel.rawValue)
+        case .b:
+            UserDefaults.standard.set(values.phraseX, forKey: EchoLabKey.slotBPhraseX.rawValue)
+            UserDefaults.standard.set(values.shieldY, forKey: EchoLabKey.slotBShieldY.rawValue)
+            UserDefaults.standard.set(values.spaceX, forKey: EchoLabKey.slotBSpaceX.rawValue)
+            UserDefaults.standard.set(values.decayY, forKey: EchoLabKey.slotBDecayY.rawValue)
+            UserDefaults.standard.set(values.level, forKey: EchoLabKey.slotBLevel.rawValue)
+        }
+    }
+
     private func loadFloat(_ key: EchoSettingKey, fallback: Float) -> Float {
         guard let number = UserDefaults.standard.object(forKey: key.rawValue) as? NSNumber else {
             return fallback
         }
         return number.floatValue
+    }
+
+    private func loadLabFloat(_ key: EchoLabKey, fallback: Float) -> Float {
+        guard let number = UserDefaults.standard.object(forKey: key.rawValue) as? NSNumber else {
+            return fallback
+        }
+        return number.floatValue
+    }
+
+    private func loadLabBool(_ key: EchoLabKey, fallback: Bool) -> Bool {
+        guard let number = UserDefaults.standard.object(forKey: key.rawValue) as? NSNumber else {
+            return fallback
+        }
+        return number.boolValue
     }
 
     private func loadDouble(_ key: EchoSettingKey, fallback: Double) -> Double {
@@ -576,6 +996,27 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             return fallback
         }
         return number.boolValue
+    }
+
+    private func loadLabSlot(_ slot: EchoLabSlot) -> EchoLabMacroValues {
+        switch slot {
+        case .a:
+            return EchoLabMacroValues(
+                phraseX: loadLabFloat(.slotAPhraseX, fallback: EchoLabDefaults.phraseX),
+                shieldY: loadLabFloat(.slotAShieldY, fallback: EchoLabDefaults.shieldY),
+                spaceX: loadLabFloat(.slotASpaceX, fallback: EchoLabDefaults.spaceX),
+                decayY: loadLabFloat(.slotADecayY, fallback: EchoLabDefaults.decayY),
+                level: loadLabFloat(.slotALevel, fallback: EchoLabDefaults.level)
+            )
+        case .b:
+            return EchoLabMacroValues(
+                phraseX: loadLabFloat(.slotBPhraseX, fallback: EchoLabDefaults.phraseX),
+                shieldY: loadLabFloat(.slotBShieldY, fallback: EchoLabDefaults.shieldY),
+                spaceX: loadLabFloat(.slotBSpaceX, fallback: EchoLabDefaults.spaceX),
+                decayY: loadLabFloat(.slotBDecayY, fallback: EchoLabDefaults.decayY),
+                level: loadLabFloat(.slotBLevel, fallback: EchoLabDefaults.level)
+            )
+        }
     }
 
     func startListening(after delay: TimeInterval = 0) {
@@ -624,6 +1065,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self?.isInjecting = false
             self?.captureSamples.removeAll()
             self?.captureTargetSamples = 0
+            self?.captureMinSamples = 0
+            self?.captureHangoverSamples = 0
+            self?.captureSilenceSamples = 0
+            self?.capturePreRollCount = 0
+            self?.captureStartTime = 0
             self?.preRollBuffer.removeAll()
             self?.preRollIndex = 0
             self?.preRollFilled = false
@@ -632,6 +1078,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self?.highPassLastInput = 0
             self?.highPassLastOutput = 0
             self?.resetEventState()
+            self?.calibrationMode = .none
+            self?.calibrationSamples.removeAll()
             self?.stopPlaybackEngine()
             DispatchQueue.main.async { [weak self] in
                 self?.deactivateAudioSession()
@@ -725,7 +1173,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
     private func stopPlaybackEngine() {
         if isWetTapInstalled {
-            boostNode?.removeTap(onBus: 0)
+            wetMeterNode?.removeTap(onBus: 0)
             isWetTapInstalled = false
         }
         audioEngine?.stop()
@@ -737,6 +1185,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         playbackFormat = nil
         isInjecting = false
         outDBMeter.set(outDBFloor)
+        wetMeterNode = nil
+        smoothedDelayTime = 0
+        smoothedFeedback = 0
+        smoothedLowPass = 0
+        smoothedOutputGain = 0
+        smoothedWetMix = 0
     }
 
     @discardableResult
@@ -783,6 +1237,11 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self.delayNode = delay
             self.boostNode = boost
             self.playbackFormat = format
+            self.smoothedDelayTime = delay.delayTime
+            self.smoothedFeedback = delay.feedback
+            self.smoothedLowPass = delay.lowPassCutoff
+            self.smoothedWetMix = delay.wetDryMix
+            self.smoothedOutputGain = gateMixer.outputVolume
             installWetMeterTap(on: boost)
             return true
         } catch {
@@ -808,6 +1267,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self?.outDBMeter.set(db)
         }
         isWetTapInstalled = true
+        wetMeterNode = node
     }
 
     private func processSpatialSamples(frames: Int,
@@ -821,6 +1281,8 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             lastSampleRate = sampleRate
             highPassLastInput = 0
             highPassLastOutput = 0
+        } else if abs(echoPreRollDuration - lastConfiguredPreRollDuration) > 0.001 {
+            configurePreRoll(sampleRate: sampleRate)
         }
 
         let frameDuration = Double(frames) / sampleRate
@@ -864,10 +1326,6 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             previous = w
         }
 
-        if isCapturing, captureSamples.count >= captureTargetSamples {
-            finalizeCapture(sampleRate: sampleRate)
-        }
-
         let rms = sqrt(sumGate2 / Float(frames))
         let inputGain = echoInputGain.clamped(to: 0.0...24.0)
         let inputCurve = echoInputCurve.clamped(to: 0.2...2.5)
@@ -890,23 +1348,68 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
                                                    level: effectiveLevel)
 
         let now = CFAbsoluteTimeGetCurrent()
+        handleCalibration(now: now,
+                          normalizedLevel: normalizedLevel,
+                          micDB: micDB,
+                          micRiseDB: micRiseDB)
         let gateThreshold = echoGateThreshold.clamped(to: 0.0...2.0)
-        let triggerRise = max(0, echoTriggerRise)
-        let retriggerInterval = max(0, echoRetriggerInterval)
-        let holdDuration = max(0, echoHoldDuration)
-        let levelRise = curvedLevel - lastCurvedLevel
+        let dynamicThreshold = (gateThreshold * echoThreshMul + echoThreshBias).clamped(to: 0.0...2.0)
+        currentDynamicThreshold = dynamicThreshold
+        let endThreshold = (gateThreshold * 0.75).clamped(to: 0.0...2.0)
+        currentEndThreshold = endThreshold
+        let triggerRiseBase = max(0, echoTriggerRise)
         let echoActive = now < eventActiveUntil
-        let passesMask = shouldTrigger(micDB: micDB, micRiseDB: micRiseDB, echoActive: echoActive)
-        let canTrigger = now >= cooldownUntil && passesMask
-        let triggerEcho = !isCapturing && curvedLevel > gateThreshold && levelRise > triggerRise && canTrigger
-        if triggerEcho {
-            lastEchoTriggerTime = now
-            cooldownUntil = now + retriggerInterval
-            lastTriggerLevel = curvedLevel
-            pendingEventMix = min(1.0, max(0.0, curvedLevel))
-            beginCapture(preRoll: snapshotPreRoll(),
-                         holdDuration: holdDuration,
-                         sampleRate: sampleRate)
+        let triggerRise = echoActive ? max(triggerRiseBase, riseMinWhenEchoActive) : triggerRiseBase
+        let retriggerInterval = max(0, echoRetriggerInterval)
+        let levelRise = curvedLevel - lastCurvedLevel
+        let passesMask = shouldTrigger(micDB: micDB,
+                                       micRiseDB: micRiseDB,
+                                       echoActive: echoActive,
+                                       frameDuration: frameDuration)
+        let withinCooldown = now < cooldownUntil
+        let withinDeafen = labSoftLockoutEnabled && now < deafenUntil
+        let shouldAttemptTrigger = !isCapturing && curvedLevel > dynamicThreshold && levelRise > triggerRise
+        if shouldAttemptTrigger {
+            if withinDeafen {
+                lastBlockReason = "Blocked (deafen)"
+                lastEventReason = lastBlockReason
+            } else if withinCooldown {
+                lastBlockReason = "Blocked (cooldown)"
+                lastEventReason = lastBlockReason
+            } else if !passesMask {
+                lastBlockReason = "Blocked (SNR mask)"
+                lastEventReason = lastBlockReason
+            } else {
+                lastEchoTriggerTime = now
+                cooldownUntil = now + retriggerInterval
+                if labSoftLockoutEnabled {
+                    deafenUntil = now + max(0, echoHardDeafen)
+                }
+                lastTriggerLevel = curvedLevel
+                pendingEventMix = min(1.0, max(0.0, curvedLevel))
+                lastEventReason = "Triggered (rise)"
+                beginCapture(preRoll: snapshotPreRoll(),
+                             maxDuration: max(minCaptureDuration, echoMaxCaptureDuration),
+                             endHangover: max(0, echoEndHangover),
+                             sampleRate: sampleRate,
+                             endThreshold: endThreshold)
+            }
+        }
+
+        if isCapturing {
+            if curvedLevel < endThreshold {
+                captureSilenceSamples += frames
+            } else {
+                captureSilenceSamples = 0
+            }
+
+            let reachedMax = captureTargetSamples > 0 && captureSamples.count >= captureTargetSamples
+            let reachedMin = captureSamples.count >= captureMinSamples
+            let hangoverReached = captureHangoverSamples > 0 && captureSilenceSamples >= captureHangoverSamples
+            if reachedMax || (reachedMin && hangoverReached) {
+                lastEventReason = reachedMax ? "Ended capture (max duration)" : "Ended capture (silence hangover)"
+                finalizeCapture(sampleRate: sampleRate)
+            }
         }
 
         let targetEcho: Float = echoActive ? 1.0 : 0.0
@@ -928,22 +1431,56 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let duckingTarget = bypassDucking ? 1.0 : (1.0 - min(duckingStrengthValue, curvedLevel * duckingLevelScaleValue))
         duckingLevel = duckingLevel * (1 - duckingResponseValue) + duckingTarget * duckingResponseValue
 
-        let outputLevel = echoMasterOutput.clamped(to: 0.0...1.0)
-        let outputRatio = echoOutputRatio.clamped(to: 0.0...1.0)
-        let inputScale = (1 - outputRatio) + outputRatio * lastTriggerLevel
-        var outputGain = outputLevel * inputScale
-        delayNode?.delayTime = echoDelayTime.clamped(to: 0.0...2.0)
-        delayNode?.feedback = echoFeedback.clamped(to: -100.0...100.0)
-        delayNode?.lowPassCutoff = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
+        let outputLevel = (labFreezeEventGainEnabled && echoActive) ? eventMasterOutput : echoMasterOutput
+        let outputRatio = (labFreezeEventGainEnabled && echoActive) ? eventOutputRatio : echoOutputRatio
+        let triggerLevel = labFreezeEventGainEnabled ? lastTriggerLevel : curvedLevel
+        let inputScale = (1 - outputRatio.clamped(to: 0.0...1.0)) + outputRatio.clamped(to: 0.0...1.0) * triggerLevel
+        var outputGain = outputLevel.clamped(to: 0.0...1.0) * inputScale
+
+        let smoothingCoeff = exp(-frameDuration / 0.06)
+        let delayTarget = echoDelayTime.clamped(to: 0.0...2.0)
+        let feedbackTarget = echoFeedback.clamped(to: -100.0...100.0)
+        let lowPassTarget = echoLowPassCutoff.clamped(to: 10.0...20_000.0)
+        smoothedDelayTime = smoothedDelayTime * smoothingCoeff + delayTarget * (1 - smoothingCoeff)
+        smoothedFeedback = smoothedFeedback * Float(smoothingCoeff) + feedbackTarget * Float(1 - smoothingCoeff)
+        smoothedLowPass = smoothedLowPass * Float(smoothingCoeff) + lowPassTarget * Float(1 - smoothingCoeff)
+        delayNode?.delayTime = smoothedDelayTime
+        delayNode?.feedback = smoothedFeedback
+        delayNode?.lowPassCutoff = smoothedLowPass
+
+        if !labFreezeEventGainEnabled, echoActive {
+            let wetBase = echoWetMixBase.clamped(to: 0.0...100.0)
+            let wetRange = echoWetMixRange.clamped(to: 0.0...100.0)
+            let mix = eventMixAtTrigger
+            let wetMix = wetBase + wetRange * mix
+            eventWetMix = wetMix.clamped(to: 0.0...100.0)
+            eventWetGain = min(0.90, max(0.0, eventWetMix / 100.0))
+        }
+
         if echoWetOnly {
             delayNode?.wetDryMix = 100
             let gain = echoActive ? eventWetGain : 0
             outputGain *= gain
         } else {
-            delayNode?.wetDryMix = echoActive ? eventWetMix : 0
+            let wetMixTarget: Float = echoActive ? eventWetMix : 0
+            smoothedWetMix = smoothedWetMix * Float(smoothingCoeff) + wetMixTarget * Float(1 - smoothingCoeff)
+            delayNode?.wetDryMix = smoothedWetMix
         }
+
         boostNode?.globalGain = echoBoostDb.clamped(to: -96.0...24.0)
-        gateMixer?.outputVolume = isInjecting ? outputGain * duckingLevel : 0
+        if labLimiterEnabled {
+            outputGain = min(outputGain, 0.85)
+        }
+
+        let targetOutput = isInjecting ? outputGain * duckingLevel : 0
+        let outputCoeff = exp(-frameDuration / 0.05)
+        smoothedOutputGain = smoothedOutputGain * Float(outputCoeff) + targetOutput * Float(1 - outputCoeff)
+        gateMixer?.outputVolume = smoothedOutputGain
+
+        publishDebugSnapshot(now: now,
+                             sampleRate: sampleRate,
+                             micDB: micDB,
+                             echoActive: echoActive)
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -964,10 +1501,12 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
     }
 
     private func configurePreRoll(sampleRate: Double) {
-        let capacity = max(1, Int(sampleRate * preRollDuration))
+        let duration = max(0.01, echoPreRollDuration)
+        let capacity = max(1, Int(sampleRate * duration))
         preRollBuffer = Array(repeating: 0, count: capacity)
         preRollIndex = 0
         preRollFilled = false
+        lastConfiguredPreRollDuration = duration
     }
 
     private func appendPreRollSample(_ sample: Float) {
@@ -990,11 +1529,22 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         return Array(head) + Array(tail)
     }
 
-    private func beginCapture(preRoll: [Float], holdDuration: Double, sampleRate: Double) {
+    private func beginCapture(preRoll: [Float],
+                              maxDuration: Double,
+                              endHangover: Double,
+                              sampleRate: Double,
+                              endThreshold: Float) {
         isCapturing = true
         captureSamples = preRoll
-        let holdSamples = max(0, Int(sampleRate * holdDuration))
-        captureTargetSamples = captureSamples.count + holdSamples
+        capturePreRollCount = preRoll.count
+        let maxSamples = max(0, Int(sampleRate * maxDuration))
+        let minSamples = max(0, Int(sampleRate * minCaptureDuration))
+        captureTargetSamples = capturePreRollCount + maxSamples
+        captureMinSamples = capturePreRollCount + minSamples
+        captureHangoverSamples = max(0, Int(sampleRate * endHangover))
+        captureSilenceSamples = 0
+        captureStartTime = CFAbsoluteTimeGetCurrent()
+        currentEndThreshold = endThreshold
 
         if captureTargetSamples == 0 || captureSamples.count >= captureTargetSamples {
             finalizeCapture(sampleRate: sampleRate)
@@ -1010,12 +1560,20 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         guard !captureSamples.isEmpty else {
             captureSamples.removeAll()
             captureTargetSamples = 0
+            captureMinSamples = 0
+            captureHangoverSamples = 0
+            captureSilenceSamples = 0
+            capturePreRollCount = 0
             return
         }
 
         scheduleSnippetPlayback(samples: captureSamples, sampleRate: sampleRate)
         captureSamples.removeAll()
         captureTargetSamples = 0
+        captureMinSamples = 0
+        captureHangoverSamples = 0
+        captureSilenceSamples = 0
+        capturePreRollCount = 0
     }
 
     private func scheduleSnippetPlayback(samples: [Float], sampleRate: Double) {
@@ -1064,6 +1622,14 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         let wetMix = wetBase + wetRange * mix
         eventWetMix = wetMix.clamped(to: 0.0...100.0)
         eventWetGain = min(0.90, max(0.0, eventWetMix / 100.0))
+        eventMixAtTrigger = mix
+        if labFreezeEventGainEnabled {
+            eventMasterOutput = echoMasterOutput
+            eventOutputRatio = echoOutputRatio
+        } else {
+            eventMasterOutput = 0
+            eventOutputRatio = 0
+        }
 
         let tail = estimatedTailDuration(delayTime: delayTime, feedback: feedback)
         eventActiveUntil = max(eventActiveUntil, now + tail)
@@ -1081,17 +1647,158 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
 
     private func shouldTrigger(micDB: Float,
                                micRiseDB: Float,
-                               echoActive: Bool) -> Bool {
+                               echoActive: Bool,
+                               frameDuration: Double) -> Bool {
+        guard labOutputMaskEnabled else { return true }
         guard echoActive else { return true }
         let outDB = outDBMeter.get()
 
         if abs(micRiseDB) < bleedRiseGuardDB {
             let delta = micDB - outDB
-            bleedDeltaDB = (1 - bleedAlpha) * bleedDeltaDB + bleedAlpha * delta
+            let stepCap = max(0.1, bleedStepCap)
+            let clampedDelta = delta.clamped(to: (bleedDeltaDB - stepCap)...(bleedDeltaDB + stepCap))
+            let tau = clampedDelta > bleedDeltaDB ? max(0.01, bleedTauUp) : max(0.01, bleedTauDown)
+            let alpha = 1 - exp(-frameDuration / tau)
+            bleedDeltaDB = bleedDeltaDB + (clampedDelta - bleedDeltaDB) * Float(alpha)
         }
 
-        let required = outDB + bleedDeltaDB + snrMarginDB
+        let required = outDB + bleedDeltaDB + echoSnrMarginDB
         return micDB >= required
+    }
+
+    func startSilenceCalibration() {
+        guard calibrationMode == .none else { return }
+        calibrationMode = .silence
+        calibrationSamples.removeAll()
+        calibrationStartTime = CFAbsoluteTimeGetCurrent()
+        calibrationEndTime = calibrationStartTime + 1.5
+        lastEventReason = "Calibrating silence"
+    }
+
+    func startBleedCalibration() {
+        guard calibrationMode == .none else { return }
+        calibrationMode = .bleed
+        calibrationSamples.removeAll()
+        calibrationStartTime = CFAbsoluteTimeGetCurrent()
+        calibrationEndTime = calibrationStartTime + 2.0
+        lastEventReason = "Calibrating bleed"
+    }
+
+    private func handleCalibration(now: Double,
+                                   normalizedLevel: Float,
+                                   micDB: Float,
+                                   micRiseDB: Float) {
+        guard calibrationMode != .none else { return }
+
+        switch calibrationMode {
+        case .silence:
+            calibrationSamples.append(normalizedLevel)
+            guard now >= calibrationEndTime else { return }
+            let noiseFloor = percentile(calibrationSamples, percent: 0.9)
+            let inputFloor = (noiseFloor * 1.2).clamped(to: 0.0...1.5)
+            let gateThreshold = max(echoGateThreshold, noiseFloor * 1.6 + 0.03)
+            DispatchQueue.main.async { [weak self] in
+                self?.echoInputFloor = inputFloor
+                self?.echoGateThreshold = gateThreshold
+            }
+            lastEventReason = "Calibrated silence"
+            calibrationMode = .none
+            calibrationSamples.removeAll()
+        case .bleed:
+            if abs(micRiseDB) < bleedRiseGuardDB {
+                let outDB = outDBMeter.get()
+                calibrationSamples.append(micDB - outDB)
+            }
+            guard now >= calibrationEndTime else { return }
+            let averageDelta: Float
+            if calibrationSamples.isEmpty {
+                averageDelta = bleedDeltaDB
+            } else {
+                averageDelta = calibrationSamples.reduce(0, +) / Float(calibrationSamples.count)
+            }
+            bleedDeltaDB = averageDelta
+            let newMargin = (averageDelta + 9).clamped(to: 7...14)
+            DispatchQueue.main.async { [weak self] in
+                self?.echoSnrMarginDB = newMargin
+            }
+            lastEventReason = "Calibrated bleed"
+            calibrationMode = .none
+            calibrationSamples.removeAll()
+        case .none:
+            break
+        }
+    }
+
+    private func percentile(_ values: [Float], percent: Float) -> Float {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let index = Int(Float(sorted.count - 1) * percent)
+        return sorted[max(0, min(sorted.count - 1, index))]
+    }
+
+    private func publishDebugSnapshot(now: Double,
+                                      sampleRate: Double,
+                                      micDB: Float,
+                                      echoActive: Bool) {
+        guard now - lastDebugPublishTime >= (1.0 / 30.0) else { return }
+        lastDebugPublishTime = now
+
+        let outDB = outDBMeter.get()
+        let bleedMargin = micDB - (outDB + bleedDeltaDB)
+        let tailRemaining = max(0, eventActiveUntil - now)
+        let captureProgressSamples = max(0, captureSamples.count - capturePreRollCount)
+        let captureElapsed = isCapturing ? max(0, Double(captureProgressSamples) / max(1, sampleRate)) : 0
+        let nextTriggerIn = max(0, max(cooldownUntil, labSoftLockoutEnabled ? deafenUntil : 0) - now)
+
+        let state: EchoLabState
+        if !isListening {
+            state = .idle
+        } else if isCapturing {
+            state = .capturing
+        } else if isInjecting {
+            state = .injecting
+        } else if tailRemaining > 0 {
+            state = .tail
+        } else if labSoftLockoutEnabled && now < deafenUntil {
+            state = .deafened
+        } else {
+            state = .armed
+        }
+
+        let calibrationRemaining = calibrationMode == .none ? 0 : max(0, calibrationEndTime - now)
+        let calibrationMessage: String?
+        switch calibrationMode {
+        case .silence:
+            calibrationMessage = "Hold still and be quiet..."
+        case .bleed:
+            calibrationMessage = "Play echo, stay silent..."
+        case .none:
+            calibrationMessage = nil
+        }
+
+        let snapshot = EchoLabDebugSnapshot(state: state,
+                                            captureElapsed: captureElapsed,
+                                            captureMax: echoMaxCaptureDuration,
+                                            tailRemaining: tailRemaining,
+                                            nextTriggerIn: nextTriggerIn,
+                                            micDB: micDB,
+                                            outDB: outDB,
+                                            bleedMarginDB: bleedMargin,
+                                            lastEventReason: lastEventReason,
+                                            bleedDeltaDB: bleedDeltaDB,
+                                            dynamicThreshold: currentDynamicThreshold,
+                                            endThreshold: currentEndThreshold,
+                                            lastBlockReason: lastBlockReason,
+                                            eventWetGain: eventWetGain,
+                                            calibrationMessage: calibrationMessage,
+                                            calibrationRemaining: calibrationRemaining)
+        DispatchQueue.main.async { [weak self] in
+            self?.debugSnapshot = snapshot
+        }
+    }
+
+    private func lerp(_ start: Double, _ end: Double, _ t: Double) -> Double {
+        start + (end - start) * t
     }
 
     private func highPassCoefficient(sampleRate: Double, cutoff: Double) -> Float {
@@ -1308,4 +2015,3 @@ private extension Float {
     VoiceAuroraView()
         .environmentObject(AudioCoordinator())
 }
-

@@ -15,6 +15,7 @@
 		C02990BD5B54FC8146DD49FC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AA043C45623C35A53106429 /* ContentView.swift */; };
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* SoundTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */; };
 		E6A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */; };
+		E1D2C3B4A5968778695A4B3C /* EchoLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D2C3B4A5968778695A4B3D /* EchoLabView.swift */; };
 		F2B3C4D5E6F7A8B9C0D1E2F3 /* HighContrastMobileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */; };
 		FA12BC34DE56F7890A1B2C3D /* VoiceAuroraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A1B2C3D4E5F60718293A4B /* VoiceAuroraView.swift */; };
 		FB12BC34DE56F7890A1B2C4E /* VoiceAuroraClassicView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A1B2C3D4E5F60718293A5C /* VoiceAuroraClassicView.swift */; };
@@ -30,6 +31,7 @@
 		AAF3D3CD174DC58CBDD91B5B /* BeboopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeboopApp.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A3 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* SoundTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundTileView.swift; sourceTree = "<group>"; };
+		E1D2C3B4A5968778695A4B3D /* EchoLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EchoLabView.swift; sourceTree = "<group>"; };
 		E5A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeSwitcherView.swift; sourceTree = "<group>"; };
 		F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighContrastMobileView.swift; sourceTree = "<group>"; };
 		F7A1B2C3D4E5F60718293A5C /* VoiceAuroraClassicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAuroraClassicView.swift; sourceTree = "<group>"; };
@@ -44,6 +46,7 @@
 				B2C3D4E5F6A7B8C9D0E1F2A3 /* AudioManager.swift */,
 				AAF3D3CD174DC58CBDD91B5B /* BeboopApp.swift */,
 				2AA043C45623C35A53106429 /* ContentView.swift */,
+				E1D2C3B4A5968778695A4B3D /* EchoLabView.swift */,
 				F1B2C3D4E5F6A7B8C9D0E1F2 /* HighContrastMobileView.swift */,
 				34C72DE8A2B6C9C8FB0E05E5 /* Info.plist */,
 				610918B689732B2C9B11B115 /* LaunchScreen.storyboard */,
@@ -149,6 +152,7 @@
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* AudioManager.swift in Sources */,
 				4DE5AC5FFB0516EC68DE3D4A /* BeboopApp.swift in Sources */,
 				C02990BD5B54FC8146DD49FC /* ContentView.swift in Sources */,
+				E1D2C3B4A5968778695A4B3C /* EchoLabView.swift in Sources */,
 				F2B3C4D5E6F7A8B9C0D1E2F3 /* HighContrastMobileView.swift in Sources */,
 				E6A1B2C3D4E5F6A7B8C9D0E1 /* ModeSwitcherView.swift in Sources */,
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* SoundTileView.swift in Sources */,
