@@ -13,8 +13,8 @@ struct ContentView: View {
         GeometryReader { geometry in
             let safeAreaInsets = geometry.safeAreaInsets
             let fullWidth = geometry.size.width + safeAreaInsets.leading + safeAreaInsets.trailing
-            let bottomAlignedHeight = geometry.size.height + safeAreaInsets.bottom
-            let tileHeight = (bottomAlignedHeight - safeAreaInsets.top) / 5
+            let fullHeight = geometry.size.height + safeAreaInsets.top + safeAreaInsets.bottom
+            let tileHeight = fullHeight / 5
             let tileWidth = fullWidth / 2
             let columns = [
                 GridItem(.fixed(tileWidth), spacing: 0),
@@ -32,56 +32,53 @@ struct ContentView: View {
                 )
                 .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    Spacer(minLength: safeAreaInsets.top)
-                    LazyVGrid(columns: columns, spacing: 0) {
-                        ForEach(0..<10, id: \.self) { index in
-                            SoundTileView(
-                                index: index,
-                                color: TileColors.color(for: index),
-                                hasRecording: audioManager.hasRecording(for: index),
-                                isRecording: audioManager.currentRecordingTile == index,
-                                playbackSpeed: audioManager.getPlaybackSpeed(for: index),
-                                playbackLevel: audioManager.playbackLevels[index] ?? 0,
-                                activeBackIndex: $activeBackIndex,
-                                onStartRecording: {
-                                    audioManager.startRecording(for: index)
-                                },
-                                onStopRecording: {
-                                    audioManager.stopRecording()
-                                    refreshTileStates()
-                                },
-                                onPlay: {
-                                    audioManager.play(tileIndex: index)
-                                },
-                                onStartLooping: {
-                                    audioManager.startLooping(tileIndex: index)
-                                },
-                                onStopLooping: {
-                                    audioManager.stopLoopingAfterCurrent(tileIndex: index)
-                                },
-                                onClear: {
-                                    audioManager.clearRecording(for: index)
-                                    refreshTileStates()
-                                },
-                                onShare: {
-                                    shareTile(index: index)
-                                },
-                                onSpeedChange: { speed in
-                                    audioManager.setPlaybackSpeed(for: index, speed: speed)
-                                },
-                                onResetSpeed: {
-                                    audioManager.resetPlaybackSpeed(for: index)
-                                }
-                            )
-                            .frame(width: tileWidth, height: tileHeight)
-                            .id("\(index)-\(tileStates[index])-[\(refreshTrigger)]-\(audioManager.playbackSpeeds[index] ?? 1.0)")
-                        }
+                LazyVGrid(columns: columns, spacing: 0) {
+                    ForEach(0..<10, id: \.self) { index in
+                        SoundTileView(
+                            index: index,
+                            color: TileColors.color(for: index),
+                            hasRecording: audioManager.hasRecording(for: index),
+                            isRecording: audioManager.currentRecordingTile == index,
+                            playbackSpeed: audioManager.getPlaybackSpeed(for: index),
+                            playbackLevel: audioManager.playbackLevels[index] ?? 0,
+                            activeBackIndex: $activeBackIndex,
+                            onStartRecording: {
+                                audioManager.startRecording(for: index)
+                            },
+                            onStopRecording: {
+                                audioManager.stopRecording()
+                                refreshTileStates()
+                            },
+                            onPlay: {
+                                audioManager.play(tileIndex: index)
+                            },
+                            onStartLooping: {
+                                audioManager.startLooping(tileIndex: index)
+                            },
+                            onStopLooping: {
+                                audioManager.stopLoopingAfterCurrent(tileIndex: index)
+                            },
+                            onClear: {
+                                audioManager.clearRecording(for: index)
+                                refreshTileStates()
+                            },
+                            onShare: {
+                                shareTile(index: index)
+                            },
+                            onSpeedChange: { speed in
+                                audioManager.setPlaybackSpeed(for: index, speed: speed)
+                            },
+                            onResetSpeed: {
+                                audioManager.resetPlaybackSpeed(for: index)
+                            }
+                        )
+                        .frame(width: tileWidth, height: tileHeight)
+                        .id("\(index)-\(tileStates[index])-[\(refreshTrigger)]-\(audioManager.playbackSpeeds[index] ?? 1.0)")
                     }
                 }
-                .frame(width: fullWidth, height: bottomAlignedHeight, alignment: .bottom)
-                .offset(x: -safeAreaInsets.leading)
-                .ignoresSafeArea(.container, edges: .bottom)
+                .frame(width: fullWidth, height: fullHeight, alignment: .top)
+                .offset(x: -safeAreaInsets.leading, y: -safeAreaInsets.top)
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
             }
         }
         .sheet(isPresented: $showShareSheet) {
