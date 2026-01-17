@@ -191,10 +191,12 @@ struct SoundTileView: View {
     @ViewBuilder
     private func backTileButton(icon: String, tint: Color, size: CGFloat, action: @escaping () -> Void) -> some View {
         let buttonSize = size * 0.24
+        let iconOffset = -buttonSize * 0.04
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: buttonSize * 0.5, weight: .semibold))
                 .foregroundColor(.white)
+                .offset(y: iconOffset)
                 .frame(width: buttonSize, height: buttonSize)
                 .background(tint.opacity(0.85))
                 .clipShape(Circle())
