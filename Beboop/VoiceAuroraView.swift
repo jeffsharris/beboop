@@ -21,6 +21,7 @@ struct VoiceAuroraView: View {
         let phase: Double
     }
 
+    @EnvironmentObject private var audioCoordinator: AudioCoordinator
     @StateObject private var audioProcessor = AuroraAudioProcessor()
     @State private var waves: [Wave] = []
     @State private var lastUpdateTime: Date = Date()
@@ -61,13 +62,16 @@ struct VoiceAuroraView: View {
             }
         }
         .onAppear {
-            audioProcessor.startListening(after: AudioHandoff.startDelay)
+            audioCoordinator.register(mode: .voiceAurora,
+                                      start: {
+                                          audioProcessor.startListening()
+                                      },
+                                      stop: { completion in
+                                          audioProcessor.stopListening(completion: completion)
+                                      })
         }
         .onDisappear {
-            audioProcessor.stopListening()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
-            audioProcessor.stopListening()
+            audioCoordinator.unregister(mode: .voiceAurora)
         }
     }
 
@@ -1056,7 +1060,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
-    func stopListening() {
+    func stopListening(completion: (() -> Void)? = nil) {
         pendingStartWorkItem?.cancel()
         pendingStartWorkItem = nil
         isListening = false
@@ -1084,6 +1088,7 @@ final class AuroraAudioProcessor: NSObject, ObservableObject {
             self?.stopPlaybackEngine()
             DispatchQueue.main.async { [weak self] in
                 self?.deactivateAudioSession()
+                completion?()
             }
         }
     }
@@ -1650,4 +1655,5 @@ private extension Float {
 
 #Preview {
     VoiceAuroraView()
+        .environmentObject(AudioCoordinator())
 }

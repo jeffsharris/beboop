@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject private var audioCoordinator: AudioCoordinator
     @StateObject private var audioManager = AudioManager()
     @State private var tileStates: [Bool] = Array(repeating: false, count: 10)
     @State private var refreshTrigger = false
@@ -89,13 +90,17 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            audioManager.activate(after: AudioHandoff.startDelay)
+            audioCoordinator.register(mode: .cozyCoos,
+                                      start: {
+                                          audioManager.activate()
+                                      },
+                                      stop: { completion in
+                                          audioManager.deactivate()
+                                          completion()
+                                      })
         }
         .onDisappear {
-            audioManager.deactivate()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
-            audioManager.deactivate()
+            audioCoordinator.unregister(mode: .cozyCoos)
         }
     }
 
@@ -126,4 +131,5 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 #Preview {
     ContentView()
+        .environmentObject(AudioCoordinator())
 }

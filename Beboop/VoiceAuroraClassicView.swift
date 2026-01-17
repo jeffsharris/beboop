@@ -16,6 +16,7 @@ struct VoiceAuroraClassicView: View {
         let phase: Double
     }
 
+    @EnvironmentObject private var audioCoordinator: AudioCoordinator
     @StateObject private var audioProcessor = ClassicAuroraAudioProcessor()
     @State private var waves: [Wave] = []
     @State private var lastWaveTime: Date = .distantPast
@@ -44,13 +45,16 @@ struct VoiceAuroraClassicView: View {
             .ignoresSafeArea()
         }
         .onAppear {
-            audioProcessor.startListening(after: AudioHandoff.startDelay)
+            audioCoordinator.register(mode: .voiceAuroraClassic,
+                                      start: {
+                                          audioProcessor.startListening()
+                                      },
+                                      stop: { completion in
+                                          audioProcessor.stopListening(completion: completion)
+                                      })
         }
         .onDisappear {
-            audioProcessor.stopListening()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: AudioHandoff.stopNotification)) { _ in
-            audioProcessor.stopListening()
+            audioCoordinator.unregister(mode: .voiceAuroraClassic)
         }
     }
 
@@ -265,7 +269,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         }
     }
 
-    func stopListening() {
+    func stopListening(completion: (() -> Void)? = nil) {
         pendingStartWorkItem?.cancel()
         pendingStartWorkItem = nil
         isListening = false
@@ -277,6 +281,7 @@ final class ClassicAuroraAudioProcessor: NSObject, ObservableObject {
         delayNode = nil
         boostNode = nil
         deactivateAudioSession()
+        completion?()
     }
 
     private func setupAudioEngine() {
@@ -438,4 +443,5 @@ private extension Double {
 
 #Preview {
     VoiceAuroraClassicView()
+        .environmentObject(AudioCoordinator())
 }
