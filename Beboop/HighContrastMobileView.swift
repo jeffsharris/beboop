@@ -111,24 +111,28 @@ struct HighContrastMobileView: View {
                 }
                 .gesture(combinedGesture)
             }
-            FreezeTouchOverlay(
-                shouldActivate: { location in
-                    hitTest(at: location) == nil
-                },
-                onFreezeChanged: { isFrozen = $0 }
+            .overlay(
+                FreezeTouchOverlay(
+                    shouldActivate: { location in
+                        hitTest(at: location) == nil
+                    },
+                    onFreezeChanged: { isFrozen = $0 }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             )
-            .ignoresSafeArea()
-            TwoFingerGestureOverlay(
-                hitTestShape: { location in
-                    hitTest(at: location)
-                },
-                onPanBegan: handleTwoFingerPanBegan,
-                onPanChanged: handleTwoFingerPanChanged,
-                onPanEnded: handleTwoFingerPanEnded,
-                onTap: handleTwoFingerTap,
-                onDoubleTap: handleTwoFingerDoubleTap
+            .overlay(
+                TwoFingerGestureOverlay(
+                    hitTestShape: { location in
+                        hitTest(at: location)
+                    },
+                    onPanBegan: handleTwoFingerPanBegan,
+                    onPanChanged: handleTwoFingerPanChanged,
+                    onPanEnded: handleTwoFingerPanEnded,
+                    onTap: handleTwoFingerTap,
+                    onDoubleTap: handleTwoFingerDoubleTap
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             )
-            .ignoresSafeArea()
         }
     }
 
@@ -918,7 +922,7 @@ struct HighContrastMobileView: View {
         path.addLine(to: end)
 
         let isActive = adjustingShapeIndex == index
-        let strokeColor = isActive ? Color.black.opacity(0.85) : Color.black.opacity(0.45)
+        let strokeColor = isActive ? Color.blue.opacity(0.8) : Color.gray.opacity(0.6)
         let strokeStyle = StrokeStyle(lineWidth: isActive ? 3 : 2,
                                       lineCap: .round,
                                       lineJoin: .round)
@@ -1081,6 +1085,10 @@ private struct FreezeTouchOverlay: UIViewRepresentable {
         @objc func handlePress(_ recognizer: UILongPressGestureRecognizer) {
             switch recognizer.state {
             case .began:
+                if let view = recognizer.view {
+                    let location = recognizer.location(in: view)
+                    guard parent.shouldActivate(location) else { return }
+                }
                 isActive = true
                 parent.onFreezeChanged(true)
             case .ended, .cancelled, .failed:
