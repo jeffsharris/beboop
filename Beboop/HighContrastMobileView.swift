@@ -72,8 +72,10 @@ struct HighContrastMobileView: View {
             GeometryReader { geometry in
                 TimelineView(.animation) { timeline in
                     Canvas { context, size in
-                        for shape in shapes {
-                            draw(shape: shape, in: size, context: &context)
+                        let activeIndex = isFrozen ? (resizingShapeIndex ?? draggedShapeIndex) : nil
+                        for (index, shape) in shapes.enumerated() {
+                            let fill = resolvedShapeColor(for: shape, index: index, activeIndex: activeIndex)
+                            draw(shape: shape, color: fill, in: size, context: &context)
                         }
                     }
                     .onChange(of: timeline.date) { _, newDate in
@@ -853,7 +855,7 @@ struct HighContrastMobileView: View {
 
     // MARK: - Drawing
 
-    private func draw(shape: ShapeState, in size: CGSize, context: inout GraphicsContext) {
+    private func draw(shape: ShapeState, color: Color, in size: CGSize, context: inout GraphicsContext) {
         let points = worldContour(for: shape)
         guard let first = points.first else { return }
 
@@ -863,7 +865,20 @@ struct HighContrastMobileView: View {
             path.addLine(to: point)
         }
         path.closeSubpath()
-        context.fill(path, with: .color(shape.color))
+        context.fill(path, with: .color(color))
+    }
+
+    private func resolvedShapeColor(for shape: ShapeState, index: Int, activeIndex: Int?) -> Color {
+        guard isFrozen, let activeIndex, index == activeIndex else {
+            return shape.color
+        }
+
+        let speed = shape.baselineSpeed.clamped(to: minBaselineSpeed...maxBaselineSpeed)
+        let t = maxBaselineSpeed > 0 ? speed / maxBaselineSpeed : 0
+        let minGray: CGFloat = 0.92
+        let maxGray: CGFloat = 0.18
+        let gray = minGray + (maxGray - minGray) * t
+        return Color(white: Double(gray))
     }
 }
 
